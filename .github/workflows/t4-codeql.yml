@@ -40,7 +40,7 @@ jobs:
         # ci-cd-layer.md on job name vs required-check context.
         language: [javascript-typescript]   # add: python, java, go, ruby, csharp, cpp
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: github/codeql-action/init@v3
         with:
           language: ${{ matrix.language }}
