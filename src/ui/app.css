@@ -1342,6 +1342,66 @@ h3 {
   font-size: 12px;
   white-space: nowrap;
 }
+.toasts {
+  position: absolute;
+  left: 50%;
+  bottom: 156px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 6px;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px 5px 8px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--sheet);
+  box-shadow: 2px 3px 0 var(--ink);
+  font-size: 14px;
+  white-space: nowrap;
+  animation: toast 2.6s var(--ease) both;
+}
+.toast[data-icon='weapon'],
+.toast[data-icon='shield'] {
+  background: var(--marker);
+}
+.toast__icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid var(--ink);
+  font-size: 13px;
+}
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0) scale(1.04);
+  }
+  16% {
+    transform: scale(1);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
 .voice {
   position: absolute;
   left: 50%;

@@ -203,6 +203,7 @@ function PauseCard({ onResume, onQuit }: { onResume: () => void; onQuit: () => v
 }
 
 const WEAPON_ICON: Record<WeaponId, string> = { pencil: '✏️', stapler: '📎', punch: '⭕', ruler: '📏' };
+const TOAST_ICON: Record<string, string> = { ammo: '📎', tape: '🩹', glue: '🧴', shield: '🛡️', ult: '⭐', weapon: '🎁' };
 
 function Hud({ crossRef, hitRef, mapRef, heard }: { crossRef: React.RefObject<HTMLDivElement | null>; hitRef: React.RefObject<HTMLDivElement | null>; mapRef: React.RefObject<HTMLCanvasElement | null>; heard: string }) {
   const t = useT();
@@ -327,6 +328,18 @@ function Hud({ crossRef, hitRef, mapRef, heard }: { crossRef: React.RefObject<HT
       ) : null}
       {h.outside ? <div className="warn">{t('hud.outside')}</div> : null}
       {h.phase === 'dead' ? <div className="down display">{t('hud.down')}</div> : null}
+
+      {/* bottom centre, above the skills: what you just gained (issue #3) */}
+      <ul className="toasts" aria-live="polite">
+        {h.toasts.map(x => (
+          <li key={x.id} className="toast" data-icon={x.icon}>
+            <span className="toast__icon" aria-hidden="true">
+              {TOAST_ICON[x.icon]}
+            </span>
+            {t(x.key, Object.fromEntries(Object.entries(x.vars).map(([k, v]) => [k, typeof v === 'string' && v.startsWith('weapon.') ? t(v) : v])))}
+          </li>
+        ))}
+      </ul>
 
       {/* bottom left: you */}
       <div className="me">

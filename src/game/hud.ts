@@ -3,6 +3,7 @@ import type { SkillIcon } from '../skills/balance';
 import type { EnemyKind } from './enemies';
 import type { WeaponId } from './weapons';
 import type { BotAvatarType } from 'bot-avatars';
+import type { ToastSpec } from './toasts';
 
 export type Phase = 'loading' | 'ready' | 'playing' | 'paused' | 'dead' | 'over';
 
@@ -86,6 +87,8 @@ export interface HudState {
   popups: Popup[];
   callouts: Callout[];
   damageDirs: { id: number; angle: number; at: number }[];
+  /** what you just gained, shown at the bottom of the screen (issue #3) */
+  toasts: (ToastSpec & { id: number; at: number })[];
   fps: number;
   scale: number;
   lowHp: boolean;
@@ -130,6 +133,7 @@ export const initialHud: HudState = {
   popups: [],
   callouts: [],
   damageDirs: [],
+  toasts: [],
   fps: 0,
   scale: 1,
   lowHp: false,

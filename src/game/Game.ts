@@ -5,6 +5,7 @@ import { cardMaterials, disposeEnemy, EnemyBank, ENEMIES, makeEnemy, waveRoster,
 import { Decals, InstancePool, Particles, Tracers } from './effects';
 import { hud, initialHud, type HudState, type KillItem, type Popup, type Summary } from './hud';
 import { bakeMascot, crateFace, inkSplat, INK, type Wear } from './textures';
+import { pickupToast, type PickupEvent } from './toasts';
 import { buildViewModel, falloff, WEAPON_ORDER, WEAPONS, type WeaponDef, type WeaponId } from './weapons';
 import { ARENA_R, buildWorld, type World } from './world';
 import type { Look, Quality } from '../profile';
@@ -269,6 +270,7 @@ export class Game {
   private killfeed: KillItem[] = [];
   private popups: Popup[] = [];
   private callouts: HudState['callouts'] = [];
+  private toasts: HudState['toasts'] = [];
   private damageDirs: HudState['damageDirs'] = [];
   private uid = 1;
   private runTime = 0;
@@ -1321,6 +1323,11 @@ export class Game {
     if (this.popups.length > 6) this.popups.shift();
   }
 
+  private toast(e: PickupEvent) {
+    this.toasts.push({ ...pickupToast(e), id: this.uid++, at: this.runTime });
+    if (this.toasts.length > 5) this.toasts.shift();
+  }
+
   private callout(key: string) {
     this.callouts.push({ id: this.uid++, key, at: this.runTime });
     if (this.callouts.length > 3) this.callouts.shift();
@@ -2141,7 +2148,11 @@ export class Game {
     if (Math.random() < 0.4) drops.push(['glue']);
     if (c.gold || Math.random() < 0.18) drops.push(['shield']);
     if (c.gold) drops.push(['ult'], ['tape'], ['glue']);
-    for (const [k, w] of drops) this.dropPickup(k, c.pos, w);
+    for (const [k, w] of drops) {
+      this.dropPickup(k, c.pos, w);
+      // a gun waits on the floor for E: say so now, the rest toast when collected
+      if (k === 'weapon' && w) this.toast({ kind: 'weapon', weapon: w, taken: false });
+    }
     this.addScore('score.crate', c.gold ? 150 : 25, false);
   }
 
@@ -2174,24 +2185,29 @@ export class Game {
         const w = list[0];
         const s = this.owned.get(w)!;
         if (s.reserve >= WEAPONS[w].reserveMax) return false;
+        const before = s.reserve;
         s.reserve = Math.min(WEAPONS[w].reserveMax, s.reserve + WEAPONS[w].mag * 2);
+        this.toast({ kind: 'ammo', weapon: w, amount: s.reserve - before });
         break;
       }
       case 'tape':
         if (p.tape >= 6) return false;
         p.tape++;
+        this.toast({ kind: 'tape', amount: 1, total: p.tape });
         break;
       case 'glue':
         if (p.glue >= 4) return false;
         p.glue++;
+        this.toast({ kind: 'glue', amount: 1, total: p.glue });
         break;
       case 'shield':
         if (p.tier < 2) p.tier++;
         p.shield = SHIELD_TIERS[p.tier];
-        this.callout('call.shieldUp');
+        this.toast({ kind: 'shield', tier: p.tier });
         break;
       case 'ult':
         this.ultCd = Math.max(0, this.ultCd - this.ultimate.cooldown * 0.5);
+        this.toast({ kind: 'ult', amount: 0.5 });
         break;
       case 'weapon':
         return false; // needs E
@@ -2323,7 +2339,7 @@ export class Game {
       this.removePickup(it.i);
       this.setWeapon(w);
       audio.play('pickup');
-      this.callout(`call.got.${w}`);
+      this.toast({ kind: 'weapon', weapon: w, taken: true });
     }
   }
 
@@ -2626,6 +2642,7 @@ export class Game {
       killfeed: this.killfeed.filter(k => t - k.at < 6),
       popups: this.popups.filter(x => t - x.at < 1.6),
       callouts: this.callouts.filter(x => t - x.at < 2.6),
+      toasts: this.toasts.filter(x => t - x.at < 2.6),
       damageDirs: this.damageDirs.filter(x => t - x.at < 1.2),
       fps: Math.round(this.fps),
       scale: this.renderer.getPixelRatio(),
