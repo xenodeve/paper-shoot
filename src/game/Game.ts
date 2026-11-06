@@ -29,7 +29,7 @@ export interface GameOptions {
   fov: number;
   invertY: boolean;
   lineBoil: boolean;
-  hooks: { crosshair?: HTMLElement | null; hit?: HTMLElement | null; dmgLayer?: HTMLElement | null; minimap?: HTMLCanvasElement | null };
+  hooks: { crosshair?: HTMLElement | null; sight?: HTMLElement | null; hit?: HTMLElement | null; dmgLayer?: HTMLElement | null; minimap?: HTMLCanvasElement | null };
   onVoiceKey?: (down: boolean) => void;
 }
 
@@ -278,6 +278,8 @@ export class Game {
   // ---- dom hooks ----
   private dmg: DmgNum[] = [];
   private crossSpread = -1;
+  private sightAds = -1;
+  private sightWeapon = '';
 
   private opts: GameOptions;
 
@@ -2441,8 +2443,8 @@ export class Game {
     const heal = p.healing ? 1 : 0;
     v.group.position.set(
       0.2 * (1 - ads) + Math.sin(p.bob) * 0.012 * hs * (1 - ads),
-      -0.2 * (1 - ads) - 0.075 * ads + Math.abs(Math.cos(p.bob)) * 0.01 * hs - reload * 0.08 - swap * 0.3 - heal * 0.35 - (p.sliding > 0 ? 0.03 : 0),
-      -0.36 + this.vmKick * 0.05 + ads * 0.04
+      -0.2 * (1 - ads) - 0.135 * ads + Math.abs(Math.cos(p.bob)) * 0.01 * hs - reload * 0.08 - swap * 0.3 - heal * 0.35 - (p.sliding > 0 ? 0.03 : 0),
+      -0.36 + this.vmKick * 0.05 - ads * 0.1
     );
     v.group.rotation.set(this.vmKick * 0.12 + reload * 0.6 + swap * 0.8, reload * 0.3, (p.sliding > 0 ? 0.25 : 0) + reload * 0.4);
     this.flashT -= raw;
@@ -2499,7 +2501,20 @@ export class Game {
         this.crossSpread = sp;
         ch.style.setProperty('--spread', `${sp}px`);
       }
-      ch.dataset.hidden = this.p.ads > 0.6 && this.weapon === 'ruler' ? 'scope' : this.p.ads > 0.6 ? 'ads' : '';
+      // the weapon's own sight takes over from the plain crosshair while aiming (#8)
+      ch.dataset.hidden = this.p.ads > 0.35 ? 'ads' : '';
+    }
+    const sight = this.opts.hooks.sight;
+    if (sight) {
+      const ads = Math.round(this.p.ads * 50) / 50;
+      if (ads !== this.sightAds) {
+        this.sightAds = ads;
+        sight.style.setProperty('--ads', String(ads));
+      }
+      if (this.weapon !== this.sightWeapon) {
+        this.sightWeapon = this.weapon;
+        sight.dataset.weapon = this.weapon;
+      }
     }
     this.mapT -= raw;
     if (this.mapT <= 0) {
