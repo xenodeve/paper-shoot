@@ -8,7 +8,8 @@ import { bakeMascot, crateFace, inkSplat, INK, type Wear } from './textures';
 import { pickupToast, type PickupEvent } from './toasts';
 import { weaponTouch } from './pickup';
 import { buildViewModel, falloff, WEAPON_ORDER, WEAPONS, type WeaponDef, type WeaponId } from './weapons';
-import { ARENA_R, buildWorld, paperAtmosphere, type World } from './world';
+import { ARENA_R } from './arena';
+import { buildWorld, paperAtmosphere, type World } from './world';
 import type { Look, Quality } from '../profile';
 
 /* ------------------------------------------------------------------ *
@@ -1359,6 +1360,9 @@ export class Game {
       p.alive = false;
       p.deathT = 0;
       p.healing = null;
+      // aiming stops with you: updateWeapon no longer runs, so the scope would stay up
+      p.ads = 0;
+      this.adsHeld = false;
       hud.set({ phase: 'dead' });
       if (document.pointerLockElement) document.exitPointerLock();
     }
@@ -2147,7 +2151,7 @@ export class Game {
     if (c.gold) drops.push(['ult'], ['tape'], ['glue']);
     for (const [k, w] of drops) {
       this.dropPickup(k, c.pos, w);
-      // a gun waits on the floor for E: say so now, the rest toast when collected
+      // a gun waits on the floor until you walk over it: say so now, the rest toast when collected
       if (k === 'weapon' && w) this.toast({ kind: 'weapon', weapon: w, taken: false });
     }
     this.addScore('score.crate', c.gold ? 150 : 25, false);
@@ -2182,9 +2186,7 @@ export class Game {
         const w = list[0];
         const s = this.owned.get(w)!;
         if (s.reserve >= WEAPONS[w].reserveMax) return false;
-        const before = s.reserve;
-        s.reserve = Math.min(WEAPONS[w].reserveMax, s.reserve + WEAPONS[w].mag * 2);
-        this.toast({ kind: 'ammo', weapon: w, amount: s.reserve - before });
+        this.topUpAmmo(w);
         break;
       }
       case 'tape':
@@ -2197,15 +2199,21 @@ export class Game {
         p.glue++;
         this.toast({ kind: 'glue', amount: 1, total: p.glue });
         break;
-      case 'shield':
-        if (p.tier < 2) p.tier++;
+      case 'shield': {
+        const upgraded = p.tier < 2;
+        if (upgraded) p.tier++;
         p.shield = SHIELD_TIERS[p.tier];
-        this.toast({ kind: 'shield', tier: p.tier });
+        this.toast({ kind: 'shield', tier: p.tier, upgraded });
         break;
-      case 'ult':
-        this.ultCd = Math.max(0, this.ultCd - this.ultimate.cooldown * 0.5);
-        this.toast({ kind: 'ult', amount: 0.5 });
+      }
+      case 'ult': {
+        // nothing to charge: leave it on the floor, like tape when the roll is full
+        if (this.ultCd <= 0) return false;
+        const gained = Math.min(this.ultCd, this.ultimate.cooldown * 0.5);
+        this.ultCd -= gained;
+        this.toast({ kind: 'ult', amount: gained / this.ultimate.cooldown });
         break;
+      }
       case 'weapon':
         return false; // guns go through touchWeapon
     }
@@ -2340,13 +2348,17 @@ export class Game {
       this.owned.set(w, { mag: def.mag, reserve: def.mag * 2 });
       this.setWeapon(w);
       this.toast({ kind: 'weapon', weapon: w, taken: true });
-    } else {
-      const before = s!.reserve;
-      s!.reserve = Math.min(def.reserveMax, s!.reserve + def.mag * 2);
-      this.toast({ kind: 'ammo', weapon: w, amount: s!.reserve - before });
-    }
+    } else this.topUpAmmo(w);
     audio.play('pickup');
     return true;
+  }
+
+  /** Two magazines into a gun's reserve, capped, and toast what actually went in. */
+  private topUpAmmo(w: WeaponId) {
+    const s = this.owned.get(w)!;
+    const before = s.reserve;
+    s.reserve = Math.min(WEAPONS[w].reserveMax, s.reserve + WEAPONS[w].mag * 2);
+    this.toast({ kind: 'ammo', weapon: w, amount: s.reserve - before });
   }
 
   // ================================================================= pings

@@ -14,6 +14,7 @@ import { KeyList } from './panels/Settings';
 import VoicePill from './components/VoicePill';
 import LatticeLoader from './components/LatticeLoader';
 import type { WeaponId } from '../game/weapons';
+import type { ToastIcon } from '../game/toasts';
 
 export function Play({ onExit }: { onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -205,7 +206,7 @@ function PauseCard({ onResume, onQuit }: { onResume: () => void; onQuit: () => v
 }
 
 const WEAPON_ICON: Record<WeaponId, string> = { pencil: '✏️', stapler: '📎', punch: '⭕', ruler: '📏' };
-const TOAST_ICON: Record<string, string> = { ammo: '📎', tape: '🩹', glue: '🧴', shield: '🛡️', ult: '⭐', weapon: '🎁' };
+const TOAST_ICON: Record<ToastIcon, string> = { ammo: '📎', tape: '🩹', glue: '🧴', shield: '🛡️', ult: '⭐', weapon: '🎁' };
 
 /**
  * Aim-down-sight overlays, one per weapon (#8). The engine writes --ads (0..1) and
@@ -383,7 +384,7 @@ function Hud({ crossRef, hitRef, mapRef, heard }: { crossRef: React.RefObject<HT
             <span className="toast__icon" aria-hidden="true">
               {TOAST_ICON[x.icon]}
             </span>
-            {t(x.key, Object.fromEntries(Object.entries(x.vars).map(([k, v]) => [k, typeof v === 'string' && v.startsWith('weapon.') ? t(v) : v])))}
+            {t(x.key, typeof x.vars.weapon === 'string' ? { ...x.vars, weapon: t(`weapon.${x.vars.weapon}`) } : x.vars)}
           </li>
         ))}
       </ul>

@@ -5,7 +5,6 @@ import { INK, kraft, notebookGround, paperGrain, rng, toonRamp } from './texture
 
 import { ARENA_R } from './arena';
 
-export { ARENA_R };
 
 /** The page's light and air: paper background, fog, a warm sky and one sun. Shared by the match and the menu backdrop. */
 export function paperAtmosphere(scene: THREE.Scene) {

@@ -11,15 +11,15 @@ export interface OrbitPose {
   lookZ: number;
 }
 
-export function orbitPose(t: number): OrbitPose {
+/** Writes into `out` when given, so a per-frame caller allocates nothing. */
+export function orbitPose(t: number, out: OrbitPose = { x: 0, y: 0, z: 0, lookX: 0, lookY: 0, lookZ: 0 }): OrbitPose {
   const a = t * 0.06; // about one lap every 105 s
   const r = 34 + Math.sin(t * 0.11) * 6;
-  return {
-    x: Math.cos(a) * r,
-    y: 9 + Math.sin(t * 0.17) * 2.5,
-    z: Math.sin(a) * r,
-    lookX: Math.sin(t * 0.07) * 1.5,
-    lookY: 2.5,
-    lookZ: Math.cos(t * 0.05) * 1.5
-  };
+  out.x = Math.cos(a) * r;
+  out.y = 9 + Math.sin(t * 0.17) * 2.5;
+  out.z = Math.sin(a) * r;
+  out.lookX = Math.sin(t * 0.07) * 1.5;
+  out.lookY = 2.5;
+  out.lookZ = Math.cos(t * 0.05) * 1.5;
+  return out;
 }
