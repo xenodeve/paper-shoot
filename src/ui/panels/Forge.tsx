@@ -12,6 +12,7 @@ import { listen, speechSupported } from '../../voice';
 import { SkillCard } from '../common';
 import { audio } from '../../game/audio';
 import type { ForgeResponse } from '../../server/forge';
+import { fallbackKind } from '../../forgeReason';
 
 type Status = 'idle' | 'working' | 'done' | 'error';
 
@@ -245,7 +246,7 @@ export function ForgePanel() {
               )}
               <p className="tiny">
                 {result.via === 'ai' ? t('forge.via.ai', { model: result.model ?? 'AI' }) : t('forge.via.offline')}
-                {result.via === 'offline' && result.fallbackReason ? ` — ${t(`forge.offlineWhy.${['no-key', 'timeout'].includes(result.fallbackReason) ? result.fallbackReason : 'other'}`)}` : ''}
+                {result.via === 'offline' && result.fallbackReason ? ` — ${t(`forge.offlineWhy.${fallbackKind(result.fallbackReason)}`)}` : ''}
               </p>
             </aside>
           </div>
