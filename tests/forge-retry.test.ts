@@ -30,6 +30,21 @@ describe('forge retries a busy provider', () => {
     expect(calls).toBe(3);
   });
 
+  test('every retry of one forge call keeps the same x-opencode-session', async () => {
+    const ids: string[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      ids.push((init.headers as Record<string, string>)['x-opencode-session']);
+      return ids.length < 3 ? busy() : ok();
+    }) as unknown as typeof fetch;
+    await forge(req, env, { retryDelayMs: 1 });
+    expect(ids.length).toBe(3);
+    expect(new Set(ids).size).toBe(1);
+    const next: string[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => (next.push((init.headers as Record<string, string>)['x-opencode-session']), ok())) as unknown as typeof fetch;
+    await forge(req, env, { retryDelayMs: 1 });
+    expect(next[0]).not.toBe(ids[0]);
+  });
+
   test('a 400 is not retried: the request itself is wrong', async () => {
     let calls = 0;
     globalThis.fetch = (async () => (calls++, new Response('{"error":{"type":"MissingSessionID"}}', { status: 400 }))) as unknown as typeof fetch;

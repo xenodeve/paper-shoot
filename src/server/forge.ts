@@ -68,21 +68,23 @@ function extractJson(text: string): unknown {
 }
 
 const USER_AGENT = 'paper-shoot/0.1';
+const newSession = () => `paper-shoot-${crypto.randomUUID()}`;
 
 /**
  * The HTTP request for one forge call. OpenCode Go routes on a per-conversation
  * `x-opencode-session` and asks clients to name themselves in `user-agent`
  * (docs: /v2/docs/console/go/); without the session header it answers
- * 400 MissingSessionID (issue #14). One forge call is one conversation.
+ * 400 MissingSessionID (issue #14). One forge call is one conversation, so its
+ * retries share the session id `forge()` passes in.
  */
-export function buildModelRequest(req: ForgeRequest, env: ForgeEnv) {
+export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session = newSession()) {
   return {
     url: `${env.baseUrl}/chat/completions`,
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${env.apiKey}`,
       'user-agent': USER_AGENT,
-      'x-opencode-session': `paper-shoot-${crypto.randomUUID()}`
+      'x-opencode-session': session
     } as Record<string, string>,
     body: JSON.stringify({
       model: env.model,
@@ -110,9 +112,9 @@ export function providerError(status: number, body: string): string {
   return `http-${status}`;
 }
 
-async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal): Promise<unknown> {
-  const r = buildModelRequest(req, env);
-  const res = await fetch(r.url, { method: 'POST', signal, headers: r.headers, body: r.body });
+async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal, session: string): Promise<unknown> {
+  const call = buildModelRequest(req, env, session);
+  const res = await fetch(call.url, { method: 'POST', signal, headers: call.headers, body: call.body });
   if (!res.ok) throw new Error(providerError(res.status, await res.text().catch(() => '')));
   const data = (await res.json()) as { choices?: { message?: { content?: string; reasoning_content?: string } }[] };
   const msg = data.choices?.[0]?.message;
@@ -140,12 +142,13 @@ export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelay
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30000);
     const delay = opts.retryDelayMs ?? 900;
+    const session = newSession();
     try {
       // OpenCode Go answers an intermittent 429 server_error (issue #14): back off and retry
       // inside the same 30 s budget before falling back to the offline forge.
       for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
         try {
-          const raw = await callModel(req, env, ctrl.signal);
+          const raw = await callModel(req, env, ctrl.signal, session);
           const r = balanceSkill(raw, req.slot, 'ai');
           if (r.ok) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: env.model };
           fallbackReason = r.error;
@@ -167,7 +170,8 @@ export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelay
   return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'offline', fallbackReason };
 }
 
-/** A tiny rate limit so a stuck client can't burn the subscription. */
+/** A tiny rate limit so a stuck client can't burn the subscription. It counts forges,
+ *  not provider calls: with retries one forge is up to 3 calls. */
 const hits = new Map<string, number[]>();
 export function allow(ip: string, perMinute = 12): boolean {
   const now = Date.now();
