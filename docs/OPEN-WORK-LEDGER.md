@@ -7,6 +7,14 @@
 
 ---
 
+## Track 0 — Enforcement
+
+| Item | Status | Gate | Next action |
+|---|---|---|---|
+| #2 CI cannot run (billing lock): restore required checks | 🟡 | account billing | When fixed: re-run T4 verify, add lint/typecheck/test/build to ruleset 26674811, revert the pre-push wording |
+| Reuse one WebGLRenderer across runs (shader warm-up repeats per run) | 🔴 | — | Efficiency review on #5; worth an issue if restarts feel slow |
+| Remaining single 32–36 ms frames during fights | 🔴 | a visible, unthrottled Chrome window | Measure with Long Animation Frames in a foreground window (see #5) |
+
 ## Track 1 — Verification gaps from the first build
 
 | Item | Status | Gate | Next action |
