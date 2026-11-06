@@ -1,0 +1,339 @@
+/* ------------------------------------------------------------------
+   Paper Shoot — a craft desk. Kraft board underneath, cream sheets on
+   top, ink outlines, masking tape, marker accents. Hard offset shadows
+   (cut paper casts crisp ones), slight rotations, nothing glossy.
+   ------------------------------------------------------------------ */
+:root {
+  --desk: #c9a774;
+  --desk-dark: #b08e5c;
+  --sheet: #fbf7ec;
+  --sheet-2: #f3ecdb;
+  --ink: #1f2a44;
+  --ink-2: #4a5470;
+  --ink-3: #8a90a3;
+  --line: rgba(31, 42, 68, 0.14);
+  --rule: rgba(86, 140, 196, 0.28);
+  --tomato: #e5533d;
+  --marker: #ffd84a;
+  --teal: #2bb3a3;
+  --blue: #3b82c4;
+  --violet: #8a5cc8;
+  --good: #2f9e5b;
+  --tape: rgba(255, 244, 196, 0.82);
+  --shadow: 3px 4px 0 rgba(31, 42, 68, 0.9);
+  --shadow-soft: 0 10px 30px -12px rgba(60, 40, 10, 0.45);
+  --r: 6px;
+  --font: 'Mali', 'Itim', system-ui, sans-serif;
+  --display: 'Itim', 'Mali', system-ui, sans-serif;
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--desk);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--marker);
+  color: var(--ink);
+}
+
+/* a kraft desk with a little grain */
+.desk {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(255, 255, 255, 0.18), transparent 55%),
+    radial-gradient(ellipse at 80% 90%, rgba(80, 50, 10, 0.18), transparent 60%),
+    repeating-linear-gradient(90deg, rgba(120, 80, 30, 0.05) 0 2px, transparent 2px 7px),
+    var(--desk);
+}
+
+/* ---------- paper primitives ---------- */
+.sheet {
+  position: relative;
+  background:
+    linear-gradient(var(--sheet), var(--sheet)) padding-box,
+    var(--sheet);
+  border: 2px solid var(--ink);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+}
+.sheet--ruled {
+  background:
+    linear-gradient(90deg, transparent 46px, rgba(226, 107, 107, 0.45) 46px 48px, transparent 48px),
+    repeating-linear-gradient(transparent 0 27px, var(--rule) 27px 28px),
+    var(--sheet);
+}
+.sheet--grid {
+  background:
+    repeating-linear-gradient(90deg, var(--rule) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(var(--rule) 0 1px, transparent 1px 22px),
+    var(--sheet);
+}
+.tape {
+  position: absolute;
+  width: 86px;
+  height: 24px;
+  background: var(--tape);
+  border-left: 1px dashed rgba(0, 0, 0, 0.08);
+  border-right: 1px dashed rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  z-index: 2;
+  pointer-events: none;
+}
+.tape--tl {
+  top: -12px;
+  left: 18px;
+  transform: rotate(-6deg);
+}
+.tape--tr {
+  top: -12px;
+  right: 18px;
+  transform: rotate(5deg);
+}
+
+.display {
+  font-family: var(--display);
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+.muted {
+  color: var(--ink-2);
+}
+.tiny {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- buttons: cut-out cards ---------- */
+.btn {
+  --bg: var(--sheet);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 2px solid var(--ink);
+  border-radius: var(--r);
+  background: var(--bg);
+  box-shadow: 2px 3px 0 var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 120ms var(--ease),
+    box-shadow 120ms var(--ease),
+    background-color 150ms ease;
+  white-space: nowrap;
+}
+.btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 4px 0 var(--ink);
+}
+.btn:active {
+  transform: translate(2px, 3px);
+  box-shadow: 0 0 0 var(--ink);
+}
+.btn:focus-visible {
+  outline: 3px solid var(--marker);
+  outline-offset: 2px;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 2px 3px 0 var(--ink);
+}
+.btn--primary {
+  --bg: var(--tomato);
+  color: #fff;
+}
+.btn--marker {
+  --bg: var(--marker);
+}
+.btn--ghost {
+  --bg: transparent;
+  box-shadow: none;
+  border-color: transparent;
+}
+.btn--ghost:hover {
+  box-shadow: none;
+  background: rgba(31, 42, 68, 0.06);
+}
+.btn--sm {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--sheet);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 150ms ease, transform 120ms var(--ease);
+}
+.chip:hover {
+  background: var(--marker);
+}
+.chip[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--sheet);
+}
+
+.kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1.5px solid var(--ink);
+  border-bottom-width: 3px;
+  border-radius: 5px;
+  background: var(--sheet);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+.field > span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px solid var(--ink);
+  border-radius: var(--r);
+  background: #fffdf6;
+  outline: none;
+  transition: box-shadow 150ms ease;
+}
+.input:focus {
+  box-shadow: 0 0 0 3px var(--marker);
+}
+
+.range {
+  width: 100%;
+  accent-color: var(--tomato);
+}
+
+.seg {
+  display: inline-flex;
+  border: 2px solid var(--ink);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.seg button {
+  padding: 6px 12px;
+  border: 0;
+  background: var(--sheet);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+.seg button + button {
+  border-left: 2px solid var(--ink);
+}
+.seg button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--sheet);
+}
+
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  flex: none;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--sheet-2);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink);
+  transition: transform 200ms var(--ease);
+}
+.toggle[aria-checked='true'] {
+  background: var(--teal);
+}
+.toggle[aria-checked='true']::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+.scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-3) transparent;
+}
+
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) rotate(var(--rot, 0deg));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(var(--rot, 0deg));
+  }
+}
+.enter {
+  animation: drop-in 380ms var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

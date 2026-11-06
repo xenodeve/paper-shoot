@@ -1,0 +1,4 @@
+# Shell scripts run under bash/sh on Linux CI and Git-for-Windows: they must stay LF.
+.githooks/* text eol=lf
+.claude/hooks/* text eol=lf
+.claude/hooks/run-hook.cmd text eol=crlf

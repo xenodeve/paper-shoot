@@ -1,0 +1,158 @@
+/* ---- LatticeLoader ---- */
+.lattice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.lattice__grid {
+  display: inline-grid;
+}
+.lattice__cell {
+  display: block;
+  background: currentColor;
+  transition:
+    opacity 120ms ease,
+    background-color 260ms ease;
+}
+.lattice[data-status='done'] .lattice__cell,
+.lattice[data-status='error'] .lattice__cell {
+  background: var(--lt-tone);
+}
+.lattice__cell[data-glow] {
+  box-shadow: 0 0 6px var(--lt-glow);
+}
+.lattice__label {
+  white-space: nowrap;
+}
+.lattice[data-status='done'] .lattice__label,
+.lattice[data-status='error'] .lattice__label {
+  color: var(--lt-tone);
+}
+.lattice__time {
+  opacity: 0.7;
+}
+
+/* ---- ThoughtLine ---- */
+.thought {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+}
+.thought__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.thought__head:disabled {
+  cursor: default;
+}
+.thought__glyph {
+  display: inline-flex;
+}
+.thought[data-working] .thought__glyph {
+  animation: tl-spin 2.4s linear infinite;
+}
+.thought__dot {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: currentColor;
+}
+.thought__label {
+  animation: tl-settle var(--tl-settle) ease both;
+}
+.thought[data-working] .thought__label {
+  animation: tl-breathe var(--tl-period) ease-in-out infinite;
+}
+.thought__timer {
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85em;
+}
+.thought__chev {
+  display: inline-block;
+  transition: transform 200ms ease;
+}
+.thought__chev[data-open] {
+  transform: rotate(90deg);
+}
+.thought__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 260ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.thought__body[data-open] {
+  grid-template-rows: 1fr;
+}
+.thought__steps {
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0 0 0 1.5em;
+  font-size: 0.85em;
+  list-style: none;
+}
+.thought__steps li {
+  position: relative;
+  padding: 0.15em 0;
+  transition: opacity 200ms ease;
+}
+.thought__steps li::before {
+  content: '';
+  position: absolute;
+  left: -1.05em;
+  top: 0.62em;
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+.thought__steps li[data-state='done']::before {
+  background: currentColor;
+}
+.thought__steps li[data-state='todo'] {
+  opacity: 0.4;
+}
+.thought__steps li[data-state='now'] {
+  animation: tl-breathe var(--tl-period) ease-in-out infinite;
+}
+@keyframes tl-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: var(--tl-depth);
+  }
+}
+@keyframes tl-settle {
+  from {
+    filter: blur(var(--tl-blur));
+    opacity: 0.3;
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+@keyframes tl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thought__label,
+  .thought__glyph,
+  .thought__steps li {
+    animation: none !important;
+  }
+}
