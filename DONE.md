@@ -12,9 +12,11 @@
 
 **Shipped:** `src/skills/program.ts` (24 contexts, `skillRow`), `checkProgram` in `balance.ts`, `src/server/codeReferee.ts` (QuickJS table builder), `codeForge.ts` + `codePrompts.ts` (designer → referee → panel, rules D1–D13 / P1–P7), `opencode.ts` (shared client), Game plays the row at cast with delayed effects, Forge panel shows votes and the script. ADR 0003; CLAUDE.md rule amended.
 
-**Validation:** `bun test` 68 pass; 14 attack scripts blocked; QuickJS absent from the client bundle (grep of `dist/assets`). Live: 2 of 3 ideas approved 5/5 through `forge()`; one designer timeout fell back to the data forge. Browser: see PR.
+**Validation:** `bun test` 84 pass; 14 attack scripts blocked; QuickJS absent from the client bundle (grep of `dist/assets`). Live: 2 of 3 ideas approved 5/5 through `forge()`; one designer timeout fell back to the data forge. Browser: see PR.
 
-**Next:** power floor + designer retry with referee feedback (ADR 0003 follow-ups).
+**Also:** real forge progress over NDJSON (plan → code → logic → review → draft), Bun idleTimeout 120, one 60 s budget, cancel on hang-up. Reviews: security-review (inherited / non-string effect types priced as NaN/Infinity — fixed), scrutinize, code-review, simplify.
+
+**Next:** power floor + designer retry with referee feedback (ADR 0003 follow-ups); route the data forge through `chat()` (needs a `reasoning_content` fallback first).
 
 ---
 

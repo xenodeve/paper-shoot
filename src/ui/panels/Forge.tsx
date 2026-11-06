@@ -14,11 +14,11 @@ import { audio } from '../../game/audio';
 import type { ForgeResponse } from '../../server/forge';
 import { fallbackKind } from '../../forgeReason';
 import { readForgeStream } from '../forgeProgress';
+import { PANEL_SIZE, type ForgeStage } from '../../skills/program';
 
 /** `forge.stage.*` keys: the server's stages plus the browser's own last re-check. */
-type ForgeStage = 'plan' | 'code' | 'logic' | 'review' | 'draft' | 'referee';
-const ORB: Record<ForgeStage, 'searching' | 'shaping' | 'solving'> = { plan: 'searching', code: 'shaping', logic: 'solving', review: 'solving', draft: 'shaping', referee: 'solving' };
-const PANEL_SIZE = 5;
+type Stage = ForgeStage | 'referee';
+const ORB: Record<Stage, 'searching' | 'shaping' | 'solving'> = { plan: 'searching', code: 'shaping', logic: 'solving', review: 'solving', draft: 'shaping', referee: 'solving' };
 
 type Status = 'idle' | 'working' | 'done' | 'error';
 
@@ -29,7 +29,7 @@ export function ForgePanel() {
   const [slot, setSlot] = useState<Slot>('tactical');
   const [status, setStatus] = useState<Status>('idle');
   // real progress from the server (issue #18): the stages seen so far, and the panel's votes
-  const [stages, setStages] = useState<ForgeStage[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
   const [votes, setVotes] = useState(0);
   const [result, setResult] = useState<Extract<ForgeResponse, { ok: true }> | null>(null);
   const [health, setHealth] = useState<{ ai: boolean; model: string } | null>(null);

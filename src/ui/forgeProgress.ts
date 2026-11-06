@@ -1,6 +1,7 @@
 import type { ForgeEvent, ForgeResponse } from '../server/forge';
+import { FORGE_STAGES } from '../skills/program';
 
-const STAGES = new Set(['plan', 'code', 'logic', 'review', 'draft']);
+const STAGES = new Set<string>(FORGE_STAGES);
 
 function asEvent(o: unknown): ForgeEvent | null {
   if (!o || typeof o !== 'object') return null;
@@ -23,6 +24,7 @@ export async function readForgeStream(res: Response, onEvent: (e: ForgeEvent) =>
   for (;;) {
     const { done, value } = await reader.read();
     if (value) buf += decoder.decode(value, { stream: !done });
+    if (done) buf += '\n'; // a last line without its newline still counts
     let nl: number;
     while ((nl = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, nl).trim();
@@ -34,7 +36,11 @@ export async function readForgeStream(res: Response, onEvent: (e: ForgeEvent) =>
       } catch {
         continue;
       }
-      if ((o as { type?: unknown })?.type === 'result') return (o as { response: ForgeResponse }).response;
+      if ((o as { type?: unknown })?.type === 'result') {
+        const response = (o as { response?: unknown }).response;
+        if (!response || typeof response !== 'object' || typeof (response as { ok?: unknown }).ok !== 'boolean') throw new Error('bad-result');
+        return response as ForgeResponse;
+      }
       const e = asEvent(o);
       if (e) onEvent(e);
     }

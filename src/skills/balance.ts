@@ -136,15 +136,16 @@ export function effectPower(e: Effect): number {
   }
 }
 
-export function skillPower(s: Pick<Skill, 'effects'>): number {
-  return s.effects.reduce((sum, e) => sum + effectPower(e), 0);
+/** The power of a list of effects, in budget points. */
+function effectsPower(effects: readonly Effect[]): number {
+  return effects.reduce((sum, e) => sum + effectPower(e), 0);
 }
 
-/** What a skill is priced at: a code skill's strongest row, else its effects. */
-export function pricedPower(s: Pick<Skill, 'effects' | 'program'>): number {
-  if (!s.program) return skillPower(s);
+/** What a skill is priced at: a code skill's strongest row (its card shows a 3-effect preview), else its effects. */
+export function skillPower(s: { effects: readonly Effect[]; program?: Program }): number {
+  if (!s.program) return effectsPower(s.effects);
   let worst = 0;
-  for (const row of s.program.table) worst = Math.max(worst, skillPower({ effects: row }));
+  for (const row of s.program.table) worst = Math.max(worst, effectsPower(row));
   return worst;
 }
 
@@ -197,11 +198,12 @@ function num(v: unknown): number | null {
 function readEffect(raw: unknown, i: number, notes: BalanceNote[]): Effect | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const type = r.type as EffectType;
-  // own keys only: an inherited name like "constructor" is not an effect (it would price as NaN)
-  const spec = Object.hasOwn(FIELDS, type) ? FIELDS[type] : undefined;
-  if (!spec) {
-    notes.push({ field: `effects[${i}]`, reason: 'unknown', from: String(r.type ?? '?').slice(0, 24) });
+  // a plain string naming an own key only: an inherited name ("constructor") or a value that
+  // coerces to a key (["area"]) is not an effect — either would price as NaN or Infinity
+  const type = typeof r.type === 'string' && Object.hasOwn(FIELDS, r.type) ? (r.type as EffectType) : null;
+  const spec = type ? FIELDS[type] : undefined;
+  if (!type || !spec) {
+    notes.push({ field: `effects[${i}]`, reason: 'unknown', from: (typeof r.type === 'string' ? r.type : '?').slice(0, 24) });
     return null;
   }
   const out: Record<string, unknown> = { type };
@@ -270,8 +272,8 @@ export function checkProgram(input: unknown, slot: Slot): ProgramResult {
       if (!fx || at === null || at < 0 || at > MAX_DELAY_S) return { ok: false, error: 'bad-effect' };
       row.push({ ...fx, at: round(at, 0.05) });
     }
-    const p = skillPower({ effects: row });
-    if (!Number.isFinite(p)) return { ok: false, error: "bad-power" };
+    const p = effectsPower(row);
+    if (!Number.isFinite(p)) return { ok: false, error: 'bad-power' };
     if (p > cap + 1e-6) return { ok: false, error: 'over-budget' };
     if (p > power) (power = p), (worstRow = r);
     table.push(row);
@@ -315,19 +317,19 @@ export function balanceSkill(input: unknown, slot: Slot, source: Skill['source']
 
   // Spend the budget: shrink until it fits; if the floors alone overflow, drop the last effect.
   const cap = POWER_CAP[slot];
-  const before = skillPower({ effects });
+  const before = effectsPower(effects);
   if (before > cap) {
     const snapshot = JSON.stringify(effects);
-    for (let guard = 0; guard < 60 && skillPower({ effects }) > cap; guard++) {
+    for (let guard = 0; guard < 60 && effectsPower(effects) > cap; guard++) {
       shrink(effects, 0.92);
-      if (guard > 40 && effects.length > 1 && skillPower({ effects }) > cap) {
+      if (guard > 40 && effects.length > 1 && effectsPower(effects) > cap) {
         notes.push({ field: `effects[${effects.length - 1}]`, reason: 'dropped' });
         effects.pop();
       }
     }
     snap(effects);
     // Rounding may have nudged a hair over the cap; trim the biggest scalable field down one step.
-    for (let guard = 0; guard < 20 && skillPower({ effects }) > cap; guard++) {
+    for (let guard = 0; guard < 20 && effectsPower(effects) > cap; guard++) {
       shrink(effects, 0.97);
       snap(effects);
     }
@@ -341,7 +343,8 @@ export function balanceSkill(input: unknown, slot: Slot, source: Skill['source']
     });
   }
 
-  const power = program ? Math.max(program.power, skillPower({ effects })) : skillPower({ effects });
+  const power = program ? program.power : effectsPower(effects);
+  if (!Number.isFinite(power)) return { ok: false, error: 'bad-power' };
   const cd = COOLDOWN[slot];
   const floor = clamp(cd.base + power * cd.perPower, cd.min, cd.max);
   const asked = num(raw.cooldown);

@@ -11,7 +11,7 @@ import { buildViewModel, falloff, WEAPON_ORDER, WEAPONS, type WeaponDef, type We
 import { ARENA_R } from './arena';
 import { buildWorld, paperAtmosphere, type World } from './world';
 import type { Look, Quality } from '../profile';
-import { ctxFrom, NEAR_RADIUS, skillRow } from '../skills/program';
+import { ctxFrom, NEAR_RADIUS, skillRow, type Program } from '../skills/program';
 
 /* ------------------------------------------------------------------ *
  *  Paper Shoot — the engine.
@@ -1804,20 +1804,20 @@ export class Game {
     if (slot === 'tactical') this.tacCd = s.cooldown;
     else this.ultCd = s.cooldown;
     audio.play(slot === 'tactical' ? 'skill' : 'ult');
-    if (s.program) this.castProgram(s);
+    if (s.program) this.castProgram(s, s.program);
     else for (const fx of s.effects) this.applyEffect(fx, s);
     this.p.shake = Math.max(this.p.shake, slot === 'ultimate' ? 0.3 : 0.1);
   }
 
   /** A code skill plays the row its referee measured for this moment (issue #18, ADR 0003). */
-  private castProgram(s: Skill) {
+  private castProgram(s: Skill, program: Program) {
     const p = this.p;
     let near = 0;
     for (const e of this.enemies) {
       if (e.state === 'dying' || e.state === 'pop') continue;
       if (e.pos.distanceToSquared(p.pos) < NEAR_RADIUS * NEAR_RADIUS) near++;
     }
-    for (const fx of skillRow(s, ctxFrom(p.hp, p.shield, near, this.time - p.lastHurt))) {
+    for (const fx of skillRow(program, ctxFrom(p.hp, p.shield, near, this.time - p.lastHurt))) {
       if (fx.at <= 0) this.applyEffect(fx, s);
       else this.skillQueue.push({ at: this.runTime + fx.at, fx, s });
     }

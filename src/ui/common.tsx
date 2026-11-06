@@ -16,7 +16,7 @@ import {
 import { BotAvatar } from 'bot-avatars';
 import type { CSSProperties, ReactNode } from 'react';
 import type { Effect, Skill, SkillIcon } from '../skills/balance';
-import { POWER_CAP, pricedPower } from '../skills/balance';
+import { POWER_CAP, skillPower } from '../skills/balance';
 import type { Look } from '../profile';
 import { useT } from '../i18n';
 
@@ -69,7 +69,7 @@ export function describeEffect(fx: Effect, t: T): string {
 
 export function PowerBar({ skill }: { skill: Skill }) {
   const t = useT();
-  const p = pricedPower(skill);
+  const p = skillPower(skill);
   const cap = POWER_CAP[skill.slot];
   return (
     <div className="power" title={`${p.toFixed(1)} / ${cap}`}>

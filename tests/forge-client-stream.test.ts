@@ -42,3 +42,13 @@ describe('readForgeStream', () => {
     expect(seen).toEqual([]);
   });
 });
+
+describe('readForgeStream edge cases', () => {
+  test('a last line without a trailing newline is still read', async () => {
+    expect(await readForgeStream(ndjson(['{"type":"result","response":{"ok":false,"error":"tail"}}']), () => {})).toEqual({ ok: false, error: 'tail' });
+  });
+
+  test('a result line without a usable response is an error, not a crash later', async () => {
+    expect(readForgeStream(ndjson(['{"type":"result"}\n']), () => {})).rejects.toThrow('bad-result');
+  });
+});

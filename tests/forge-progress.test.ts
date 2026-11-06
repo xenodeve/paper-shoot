@@ -78,3 +78,33 @@ describe('forgeStream: NDJSON for the browser', () => {
     expect(last.response.ok && last.response.skill.program.table.length).toBe(24);
   });
 });
+
+describe('cancellation and budgets', () => {
+  test('a client that disconnects stops the forge: no more provider calls after cancel', async () => {
+    let calls = 0;
+    globalThis.fetch = (async (_u: string, init: RequestInit) => {
+      calls++;
+      await new Promise((ok, no) => {
+        const t = setTimeout(ok, 200);
+        init.signal?.addEventListener('abort', () => (clearTimeout(t), no(new DOMException('aborted', 'AbortError'))));
+      });
+      return json('no code here');
+    }) as unknown as typeof fetch;
+    const stream = forgeStream(req, env, { retryDelayMs: 1 });
+    const reader = stream.getReader();
+    await reader.read(); // the first stage line
+    await reader.cancel();
+    const at = calls;
+    await new Promise(r => setTimeout(r, 600));
+    expect(calls).toBe(at);
+  });
+
+  test('when the provider itself failed on the code path, the data path is skipped (no second wait)', async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => (calls++, new Response('{"error":{"type":"unauthorized"}}', { status: 401 }))) as unknown as typeof fetch;
+    const r = await forge(req, env, { retryDelayMs: 1 });
+    expect(r.ok && r.via).toBe('offline');
+    expect(r.ok && r.fallbackReason).toBe('http-401:unauthorized');
+    expect(calls).toBe(2); // one per designer, none for the data forge
+  });
+});

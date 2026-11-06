@@ -60,10 +60,16 @@ export interface Program {
   votes: Vote[];
 }
 
-/** What the game plays at cast: a program's row for the live context, or the plain effects now. */
-export function skillRow(s: { effects: Effect[]; program?: Program }, ctx: Ctx): readonly TimedEffect[] {
-  return s.program ? (s.program.table[ctxIndex(ctx)] ?? []) : s.effects.map(e => ({ ...e, at: 0 }));
+/** What a code skill plays at cast: its row for the live context. */
+export function skillRow(program: Program, ctx: Ctx): readonly TimedEffect[] {
+  return program.table[ctxIndex(ctx)] ?? [];
 }
+
+/** The forge's progress stages, as the server emits them (shared so the client cannot drift). */
+export const FORGE_STAGES = ['plan', 'code', 'logic', 'review', 'draft'] as const;
+export type ForgeStage = (typeof FORGE_STAGES)[number];
+/** How many models sit on the review panel (`PANEL` in src/server/codeForge.ts; a test keeps them equal). */
+export const PANEL_SIZE = 5;
 
 export const MAX_ROW_EFFECTS = 12;
 /** Any number a script emits outside 0..MAX_NUMBER rejects the program (clamping is for small slips). */

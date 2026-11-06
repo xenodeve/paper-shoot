@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ALL_CTX, ctxFrom, ctxIndex, skillRow } from '../src/skills/program';
-import { balanceSkill, checkProgram, pricedPower, skillPower } from '../src/skills/balance';
+import { balanceSkill, checkProgram, skillPower } from '../src/skills/balance';
 
 const row = (...fx: object[]) => fx;
 const table = (fill: (i: number) => object[]) => ALL_CTX.map((_, i) => fill(i));
@@ -20,11 +20,10 @@ describe('contexts', () => {
 });
 
 describe('skillRow: what the game plays at cast', () => {
-  test('a program plays the row for the live context; a plain skill plays its effects now', () => {
+  test('a program plays the row for the live context', () => {
     const program = { source: '', votes: [], table: ALL_CTX.map((c, i) => [{ type: 'shield' as const, amount: 10 + i, at: c.hpLow ? 1 : 0 }]) };
     const low = ctxFrom(20, 0, 0, 99);
-    expect(skillRow({ effects: [], program }, low)).toEqual([{ type: 'shield', amount: 10 + ctxIndex(low), at: 1 }]);
-    expect(skillRow({ effects: [{ type: 'dash', distance: 8 }] }, low)).toEqual([{ type: 'dash', distance: 8, at: 0 }]);
+    expect(skillRow(program, low)).toEqual([{ type: 'shield', amount: 10 + ctxIndex(low), at: 1 }]);
   });
 });
 
@@ -98,13 +97,13 @@ describe('balanceSkill with a program', () => {
     expect(r.ok && plain.ok && r.skill.cooldown > plain.skill.cooldown).toBe(true);
   });
 
-  test('pricedPower: the card shows the strongest row, not the 3-effect preview', () => {
+  test('skillPower of a code skill is its strongest row, not the 3-effect preview on the card', () => {
     const big = Array.from({ length: 5 }, () => ({ type: 'reveal' as const, radius: 20, duration: 4, at: 0 }));
     const program = { source: 'x', votes: [], table: table(i => (i === 3 ? big : row({ type: 'reveal', radius: 10, duration: 2, at: 0 }))) };
     const r = balanceSkill({ name: 'Eyes', program }, 'tactical');
     expect(r.ok && r.skill.effects.length).toBe(3);
-    expect(r.ok && pricedPower(r.skill)).toBeCloseTo(5 * 20 * 4 * 0.05);
-    expect(r.ok && skillPower(r.skill)).toBeCloseTo(3 * 20 * 4 * 0.05);
+    expect(r.ok && skillPower(r.skill)).toBeCloseTo(5 * 20 * 4 * 0.05);
+    expect(r.ok && r.power).toBeCloseTo(5 * 20 * 4 * 0.05);
   });
 
   test('drops an invalid program and keeps the plain effects, with a note', () => {

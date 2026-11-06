@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { codeForge, PANEL } from '../src/server/codeForge';
 import { forge } from '../src/server/forge';
+import { PANEL_SIZE } from '../src/skills/program';
 
 const env = { apiKey: 'k', baseUrl: 'https://example.test/v1', model: 'deepseek-v4.1-flash', codeSkills: true };
 const req = { prompt: 'โล่', slot: 'tactical' as const, lang: 'th' as const };
@@ -28,6 +29,10 @@ function mock(onReview: (model: string) => Response | Promise<Response>, onDesig
 }
 
 describe('codeForge: designer → referee → panel', () => {
+  test('the client-side panel size matches the real panel', () => {
+    expect(PANEL.length).toBe(PANEL_SIZE);
+  });
+
   test('all five reviewers pass: the skill carries the program and the votes', async () => {
     const seen = mock(() => reply(vote(true)));
     const r = await codeForge(req, env, { retryDelayMs: 1 });

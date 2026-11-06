@@ -123,47 +123,53 @@ const ATTEMPTS = 3;
 /** The whole forge, code path and data fallback together, stays inside this. */
 const TOTAL_MS = 60000;
 const DATA_MS = 30000;
-const DATA_MIN_MS = 10000;
+/** The code path failed because the provider did (not the script): the data path would only wait again. */
+const providerDown = (reason: string) => /^designer(-timeout$|:http-)/.test(reason);
 
 export async function forge(req: ForgeRequest, env: ForgeEnv, opts: CodeForgeOptions = {}): Promise<ForgeResponse> {
-  const started = Date.now();
+  // one budget for everything, also ended by the caller (a client that hung up)
+  const total = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(TOTAL_MS)]) : AbortSignal.timeout(TOTAL_MS);
   let fallbackReason: string | undefined;
+  let tryData = Boolean(env.apiKey);
   if (env.apiKey && env.codeSkills) {
-    const c = await codeForge(req, env, opts);
+    const c = await codeForge(req, env, { ...opts, signal: total });
     if (c.ok) {
       const r = balanceSkill(c.input, req.slot, 'ai');
       if (r.ok && r.skill.program) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: c.designer };
     }
     // not approved: no script is used anywhere; the data forge below takes over
     console.info(`[forge] code skill not used: ${c.ok ? 'failed re-referee' : c.reason}`);
+    if (!c.ok && (providerDown(c.reason) || c.reason === 'cancelled')) {
+      tryData = false;
+      fallbackReason = c.reason === 'designer-timeout' ? 'timeout' : c.reason.replace(/^designer:/, '');
+    }
   }
   opts.onEvent?.({ type: 'stage', stage: 'draft' });
-  if (env.apiKey) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), Math.min(DATA_MS, Math.max(DATA_MIN_MS, TOTAL_MS - (Date.now() - started))));
+  if (tryData && !total.aborted) {
+    const signal = AbortSignal.any([total, AbortSignal.timeout(DATA_MS)]);
     const delay = opts.retryDelayMs ?? 900;
     const session = newSession();
-    try {
+    {
       // OpenCode Go answers an intermittent 429 server_error (issue #14): back off and retry
       // inside the same 30 s budget before falling back to the offline forge.
       for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
         try {
-          const raw = await callModel(req, env, ctrl.signal, session);
+          const raw = await callModel(req, env, signal, session);
           const r = balanceSkill(raw, req.slot, 'ai');
           if (r.ok) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: env.model };
           fallbackReason = r.error;
           break;
         } catch (err) {
-          fallbackReason = ctrl.signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
+          fallbackReason = signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
           if (!isBusy(fallbackReason) || attempt === ATTEMPTS) break;
-          await pause(delay * attempt, ctrl.signal);
+          await pause(delay * attempt, signal);
         }
       }
-    } finally {
-      clearTimeout(timer);
     }
-  } else {
+  } else if (!env.apiKey) {
     fallbackReason = 'no-key';
+  } else if (!fallbackReason) {
+    fallbackReason = 'timeout';
   }
   const r = balanceSkill(offlineSkill(req.prompt, req.slot, req.lang), req.slot, 'offline');
   if (!r.ok) return { ok: false, error: r.error };
@@ -180,16 +186,29 @@ export const wantsStream = (accept: string | null | undefined) => !!accept && ac
  */
 export function forgeStream(req: ForgeRequest, env: ForgeEnv, opts: CodeForgeOptions = {}): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
+  const hangUp = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, hangUp.signal]) : hangUp.signal;
   return new ReadableStream({
     async start(ctrl) {
-      const line = (o: unknown) => ctrl.enqueue(enc.encode(`${JSON.stringify(o)}\n`));
+      const line = (o: unknown) => {
+        if (hangUp.signal.aborted) return;
+        try {
+          ctrl.enqueue(enc.encode(`${JSON.stringify(o)}\n`));
+        } catch {
+          hangUp.abort(); // the stream closed under us
+        }
+      };
       try {
-        const response = await forge(req, env, { ...opts, onEvent: e => line(e) });
+        const response = await forge(req, env, { ...opts, signal, onEvent: e => line(e) });
         line({ type: 'result', response });
       } catch {
         line({ type: 'result', response: { ok: false, error: 'server-error' } });
       }
-      ctrl.close();
+      if (!hangUp.signal.aborted) ctrl.close();
+    },
+    // the client went away: stop calling the provider for a page nobody is watching
+    cancel() {
+      hangUp.abort();
     }
   });
 }

@@ -1,5 +1,5 @@
 import { checkProgram, POWER_CAP } from '../skills/balance.ts';
-import type { Program, Vote } from '../skills/program.ts';
+import type { ForgeStage, Program, Vote } from '../skills/program.ts';
 import { buildTable } from './codeReferee.ts';
 import { DESIGNER, REVIEWER, type Lens } from './codePrompts.ts';
 import { chat, type Provider } from './opencode.ts';
@@ -55,23 +55,19 @@ function parseVote(text: string): { pass: boolean; reason: string } | null {
   }
 }
 
-const within = (ms: number) => {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  return { signal: ctrl.signal, done: () => clearTimeout(timer) };
-};
-
 /** What the player sees while a skill is forged: real stages, emitted as they happen. */
-export type ForgeStage = 'plan' | 'code' | 'logic' | 'review' | 'draft';
 export type ForgeEvent = { type: 'stage'; stage: ForgeStage } | { type: 'vote'; model: string; vote: Vote['vote'] };
 
 export interface CodeForgeOptions {
   retryDelayMs?: number;
   onEvent?: (e: ForgeEvent) => void;
+  /** the caller's budget or a client hang-up; each stage also has its own cap */
+  signal?: AbortSignal;
 }
 
 export async function codeForge(req: CodeForgeRequest, provider: Provider, opts: CodeForgeOptions = {}): Promise<CodeForgeResult> {
   const emit = opts.onEvent ?? (() => {});
+  const stage = (ms: number) => (opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms));
   const cap = POWER_CAP[req.slot];
   emit({ type: 'stage', stage: 'plan' });
   const lang = req.lang === 'th' ? 'Thai' : 'English';
@@ -80,9 +76,9 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
   let design: ReturnType<typeof parseDesign> = null;
   let designer = '';
   let why = 'designer-failed';
-  const d = within(DESIGN_MS);
+  const designSignal = stage(DESIGN_MS);
   let coding = false;
-  try {
+  {
     for (const model of DESIGNERS) {
       try {
         const text = await chat(provider, {
@@ -90,7 +86,7 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
           system: DESIGNER,
           user: `Slot: ${req.slot} (budget ${cap}). Player language: ${lang}.\nIdea: ${req.prompt}`,
           params: { temperature: 0.9, max_tokens: 3000 },
-          signal: d.signal,
+          signal: designSignal,
           retryDelayMs: opts.retryDelayMs,
           // planning is the NAME/DESC part; the moment the code block opens, it is coding
           onText: soFar => {
@@ -107,12 +103,10 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
         }
         why = 'designer-no-code';
       } catch (e) {
-        why = d.signal.aborted ? 'designer-timeout' : `designer:${e instanceof Error ? e.message : 'error'}`;
-        if (d.signal.aborted) break;
+        why = opts.signal?.aborted ? 'cancelled' : designSignal.aborted ? 'designer-timeout' : `designer:${e instanceof Error ? e.message : 'error'}`;
+        if (designSignal.aborted) break;
       }
     }
-  } finally {
-    d.done();
   }
   if (!design) return { ok: false, reason: why };
 
@@ -127,11 +121,12 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
   // 3. Panel — in parallel; ≥ QUORUM usable votes, and any reject rejects.
   const review = `Idea: ${req.prompt}\nSlot: ${req.slot}\nNAME: ${design.name}\nDESC: ${design.description}\nMeasured worst-case power: ${power}/${cap}\nCode:\n${design.code}`;
   emit({ type: 'stage', stage: 'review' });
-  const p = within(PANEL_MS);
+  if (opts.signal?.aborted) return { ok: false, reason: 'cancelled' };
+  const panelSignal = stage(PANEL_MS);
   const votes: (Vote | null)[] = await Promise.all(
     PANEL.map(async r => {
       try {
-        const v = parseVote(await chat(provider, { model: r.model, system: REVIEWER(r.lens), user: review, params: r.params, signal: p.signal, retryDelayMs: opts.retryDelayMs }));
+        const v = parseVote(await chat(provider, { model: r.model, system: REVIEWER(r.lens), user: review, params: r.params, signal: panelSignal, retryDelayMs: opts.retryDelayMs }));
         if (!v) return null;
         const vote = v.pass ? ('pass' as const) : ('reject' as const);
         emit({ type: 'vote', model: r.model, vote });
@@ -140,7 +135,7 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
         return null;
       }
     })
-  ).finally(p.done);
+  );
   const usable = votes.filter((v): v is Vote => v !== null);
   if (usable.length < QUORUM) return { ok: false, reason: 'panel-quorum' };
   if (usable.some(v => v.vote === 'reject')) return { ok: false, reason: 'panel-reject' };
