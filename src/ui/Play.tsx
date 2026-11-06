@@ -18,6 +18,7 @@ import type { WeaponId } from '../game/weapons';
 export function Play({ onExit }: { onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const crossRef = useRef<HTMLDivElement>(null);
+  const sightRef = useRef<HTMLDivElement>(null);
   const hitRef = useRef<HTMLDivElement>(null);
   const dmgRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLCanvasElement>(null);
@@ -43,7 +44,7 @@ export function Play({ onExit }: { onExit: () => void }) {
       fov: s.fov,
       invertY: s.invertY,
       lineBoil: s.lineBoil,
-      hooks: { crosshair: crossRef.current, hit: hitRef.current, dmgLayer: dmgRef.current, minimap: mapRef.current },
+      hooks: { crosshair: crossRef.current, sight: sightRef.current, hit: hitRef.current, dmgLayer: dmgRef.current, minimap: mapRef.current },
       onVoiceKey: down => {
         if (!settings.get().voice) return;
         if (down && !rec) {
@@ -96,6 +97,7 @@ export function Play({ onExit }: { onExit: () => void }) {
     <div className="play" data-phase={phase}>
       <canvas ref={canvasRef} className="play__canvas" />
       <div ref={dmgRef} className="dmg-layer" aria-hidden="true" />
+      <Sight sightRef={sightRef} />
       <Hud crossRef={crossRef} hitRef={hitRef} mapRef={mapRef} heard={heard} />
       {phase === 'loading' && <LoadingCard />}
       {phase === 'ready' && <ReadyCard onGo={() => gameRef.current?.start()} />}
@@ -204,6 +206,52 @@ function PauseCard({ onResume, onQuit }: { onResume: () => void; onQuit: () => v
 
 const WEAPON_ICON: Record<WeaponId, string> = { pencil: '✏️', stapler: '📎', punch: '⭕', ruler: '📏' };
 const TOAST_ICON: Record<string, string> = { ammo: '📎', tape: '🩹', glue: '🧴', shield: '🛡️', ult: '⭐', weapon: '🎁' };
+
+/**
+ * Aim-down-sight overlays, one per weapon (#8). The engine writes --ads (0..1) and
+ * data-weapon on the root every frame it changes; CSS does the rest.
+ */
+function Sight({ sightRef }: { sightRef: React.RefObject<HTMLDivElement | null> }) {
+  const ticks = Array.from({ length: 9 }, (_, i) => (i - 4) * 22);
+  return (
+    <div ref={sightRef} className="sight" data-weapon="pencil" aria-hidden="true">
+      {/* Ruler Rifle: a rolled-paper scope tube */}
+      <div className="sight__scope">
+        <svg className="sight__reticle" viewBox="-200 -200 400 400">
+          <circle r="196" className="ink-ring" />
+          <path d="M-196 0H-14M14 0H196M0 -196V-14M0 14V196" className="ink" />
+          {ticks.filter(x => x !== 0).map(x => (
+            <path key={'h' + x} d={`M${x} -${Math.abs(x) % 44 ? 5 : 10}V${Math.abs(x) % 44 ? 5 : 10}`} className="ink thin" />
+          ))}
+          {ticks.filter(x => x > 0).map(y => (
+            <path key={'v' + y} d={`M-${y % 44 ? 5 : 10} ${y}H${y % 44 ? 5 : 10}`} className="ink thin" />
+          ))}
+          <circle r="2.6" className="dot" />
+        </svg>
+      </div>
+      {/* Pencil Pistol: a drawn ring with a lead dot */}
+      <svg className="sight__small" data-for="pencil" viewBox="-40 -40 80 80">
+        <circle r="15" className="ink" />
+        <path d="M0 -24V-18M0 18V24M-24 0H-18M18 0H24" className="ink" />
+        <circle r="2.4" className="dot" />
+      </svg>
+      {/* Stapler SMG: holo corners with a chevron */}
+      <svg className="sight__small" data-for="stapler" viewBox="-40 -40 80 80">
+        <path d="M-22 -14V-22H-14M14 -22H22V-14M22 14V22H14M-14 22H-22V14" className="ink teal" />
+        <path d="M-6 6L0 0L6 6" className="ink teal" />
+        <circle r="1.8" className="dot" />
+      </svg>
+      {/* Hole Punch: the spread ring, with four punch holes */}
+      <svg className="sight__small" data-for="punch" viewBox="-50 -50 100 100">
+        <circle r="34" className="ink dashed" />
+        {[0, 90, 180, 270].map(a => (
+          <circle key={a} r="4" cx={Math.cos((a * Math.PI) / 180) * 34} cy={Math.sin((a * Math.PI) / 180) * 34} className="hole" />
+        ))}
+        <circle r="2.4" className="dot" />
+      </svg>
+    </div>
+  );
+}
 
 function Hud({ crossRef, hitRef, mapRef, heard }: { crossRef: React.RefObject<HTMLDivElement | null>; hitRef: React.RefObject<HTMLDivElement | null>; mapRef: React.RefObject<HTMLCanvasElement | null>; heard: string }) {
   const t = useT();
