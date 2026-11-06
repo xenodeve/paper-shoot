@@ -6,8 +6,10 @@ import { Decals, InstancePool, Particles, Tracers } from './effects';
 import { hud, initialHud, type HudState, type KillItem, type Popup, type Summary } from './hud';
 import { bakeMascot, crateFace, inkSplat, INK, type Wear } from './textures';
 import { pickupToast, type PickupEvent } from './toasts';
+import { weaponTouch } from './pickup';
 import { buildViewModel, falloff, WEAPON_ORDER, WEAPONS, type WeaponDef, type WeaponId } from './weapons';
-import { ARENA_R, buildWorld, paperAtmosphere, type World } from './world';
+import { ARENA_R } from './arena';
+import { buildWorld, paperAtmosphere, type World } from './world';
 import type { Look, Quality } from '../profile';
 
 /* ------------------------------------------------------------------ *
@@ -1358,6 +1360,9 @@ export class Game {
       p.alive = false;
       p.deathT = 0;
       p.healing = null;
+      // aiming stops with you: updateWeapon no longer runs, so the scope would stay up
+      p.ads = 0;
+      this.adsHeld = false;
       hud.set({ phase: 'dead' });
       if (document.pointerLockElement) document.exitPointerLock();
     }
@@ -2146,7 +2151,7 @@ export class Game {
     if (c.gold) drops.push(['ult'], ['tape'], ['glue']);
     for (const [k, w] of drops) {
       this.dropPickup(k, c.pos, w);
-      // a gun waits on the floor for E: say so now, the rest toast when collected
+      // a gun waits on the floor until you walk over it: say so now, the rest toast when collected
       if (k === 'weapon' && w) this.toast({ kind: 'weapon', weapon: w, taken: false });
     }
     this.addScore('score.crate', c.gold ? 150 : 25, false);
@@ -2181,9 +2186,7 @@ export class Game {
         const w = list[0];
         const s = this.owned.get(w)!;
         if (s.reserve >= WEAPONS[w].reserveMax) return false;
-        const before = s.reserve;
-        s.reserve = Math.min(WEAPONS[w].reserveMax, s.reserve + WEAPONS[w].mag * 2);
-        this.toast({ kind: 'ammo', weapon: w, amount: s.reserve - before });
+        this.topUpAmmo(w);
         break;
       }
       case 'tape':
@@ -2196,17 +2199,23 @@ export class Game {
         p.glue++;
         this.toast({ kind: 'glue', amount: 1, total: p.glue });
         break;
-      case 'shield':
-        if (p.tier < 2) p.tier++;
+      case 'shield': {
+        const upgraded = p.tier < 2;
+        if (upgraded) p.tier++;
         p.shield = SHIELD_TIERS[p.tier];
-        this.toast({ kind: 'shield', tier: p.tier });
+        this.toast({ kind: 'shield', tier: p.tier, upgraded });
         break;
-      case 'ult':
-        this.ultCd = Math.max(0, this.ultCd - this.ultimate.cooldown * 0.5);
-        this.toast({ kind: 'ult', amount: 0.5 });
+      }
+      case 'ult': {
+        // nothing to charge: leave it on the floor, like tape when the roll is full
+        if (this.ultCd <= 0) return false;
+        const gained = Math.min(this.ultCd, this.ultimate.cooldown * 0.5);
+        this.ultCd -= gained;
+        this.toast({ kind: 'ult', amount: gained / this.ultimate.cooldown });
         break;
+      }
       case 'weapon':
-        return false; // needs E
+        return false; // guns go through touchWeapon
     }
     audio.play('pickup');
     return true;
@@ -2246,7 +2255,7 @@ export class Game {
         this.plane = null;
       }
     }
-    // pickups: pop out, settle, bob, drift to the player
+    // pickups: pop out, settle, then rest and turn
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const pk = this.pickups[i];
       pk.t += dt;
@@ -2263,23 +2272,23 @@ export class Game {
         pk.vel.x *= Math.exp(-dt * 8);
         pk.vel.z *= Math.exp(-dt * 8);
       }
-      pk.obj.rotation.y += dt * 1.8;
-      pk.obj.position.y = pk.pos.y + Math.sin(pk.t * 3 + i) * 0.08;
-      if (!p.alive || pk.kind === 'weapon' || pk.t < 0.4) continue;
-      _b.subVectors(this.eyePos(_c).setY(p.pos.y + 0.9), pk.pos);
-      const d = _b.length();
-      if (d < 4.2) pk.pos.addScaledVector(_b.normalize(), dt * (10 - d * 1.5));
-      if (d < 1.1 && this.collect(pk)) {
-        this.removePickup(i);
-      }
+      // rest where they land and turn slowly (#11): no bob, no drift toward the player
+      pk.obj.rotation.y += dt * 0.9;
+      pk.obj.position.y = pk.pos.y;
+      if (!p.alive || pk.t < 0.4) continue;
+      // taken by walking into it
+      const dx = pk.pos.x - p.pos.x;
+      const dz = pk.pos.z - p.pos.z;
+      if (dx * dx + dz * dz > 1.3 * 1.3 || Math.abs(pk.pos.y - (p.pos.y + 0.6)) > 1.6) continue;
+      if (pk.kind === 'weapon' ? this.touchWeapon(pk) : this.collect(pk)) this.removePickup(i);
     }
     // the prompt for E
     const near = this.nearestInteractable();
-    const want = near ? (near.kind === 'crate' ? { key: near.gold ? 'prompt.gold' : 'prompt.crate' } : { key: 'prompt.weapon', arg: near.weapon }) : null;
+    const want = near ? { key: near.gold ? 'prompt.gold' : 'prompt.crate' } : null;
     this.prompt = want;
   }
 
-  private prompt: { key: string; arg?: string } | null = null;
+  private prompt: { key: string } | null = null;
 
   private removePickup(i: number) {
     const pk = this.pickups[i];
@@ -2300,7 +2309,8 @@ export class Game {
     return t === Infinity ? 0 : Math.max(0, _d.y - t);
   }
 
-  private nearestInteractable(): { kind: 'crate'; gold: boolean; c: Crate } | { kind: 'weapon'; weapon: WeaponId; i: number } | null {
+  /** Crates are the only thing E opens; guns are taken by walking into them (#11). */
+  private nearestInteractable(): { kind: 'crate'; gold: boolean; c: Crate } | null {
     const p = this.p;
     const eye = this.eyePos(_o);
     this.aimDir(_d);
@@ -2318,25 +2328,37 @@ export class Game {
       }
     };
     for (const c of this.crates) if (!c.open && c.fallV <= 0) consider(c.pos, () => ({ kind: 'crate', gold: c.gold, c }));
-    this.pickups.forEach((pk, i) => {
-      if (pk.kind === 'weapon' && pk.t > 0.3) consider(pk.pos, () => ({ kind: 'weapon', weapon: pk.weapon!, i }));
-    });
     if (!p.alive) return null;
     return best;
   }
 
   private interact() {
     const it = this.nearestInteractable();
-    if (!it) return;
-    if (it.kind === 'crate') this.openCrate(it.c);
-    else {
-      const w = it.weapon;
-      this.owned.set(w, { mag: WEAPONS[w].mag, reserve: WEAPONS[w].mag * 2 });
-      this.removePickup(it.i);
+    if (it) this.openCrate(it.c);
+  }
+
+  /** Walking into a dropped gun: take and equip it, or top up the one you have. True when it was used up. */
+  private touchWeapon(pk: Pickup): boolean {
+    const w = pk.weapon!;
+    const def = WEAPONS[w];
+    const s = this.owned.get(w);
+    const act = weaponTouch({ owned: Boolean(s), reserve: s?.reserve ?? 0, reserveMax: def.reserveMax });
+    if (act === 'none') return false;
+    if (act === 'equip') {
+      this.owned.set(w, { mag: def.mag, reserve: def.mag * 2 });
       this.setWeapon(w);
-      audio.play('pickup');
       this.toast({ kind: 'weapon', weapon: w, taken: true });
-    }
+    } else this.topUpAmmo(w);
+    audio.play('pickup');
+    return true;
+  }
+
+  /** Two magazines into a gun's reserve, capped, and toast what actually went in. */
+  private topUpAmmo(w: WeaponId) {
+    const s = this.owned.get(w)!;
+    const before = s.reserve;
+    s.reserve = Math.min(WEAPONS[w].reserveMax, s.reserve + WEAPONS[w].mag * 2);
+    this.toast({ kind: 'ammo', weapon: w, amount: s.reserve - before });
   }
 
   // ================================================================= pings

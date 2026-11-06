@@ -31,13 +31,15 @@ export class Backdrop {
   private disposed = false;
   /** CPU ms of the last rendered frame — read by the play-test, never shown. */
   lastFrameMs = 0;
+  /** reused every frame: the orbit writes into it instead of allocating */
+  private pose = orbitPose(0);
 
   /**
    * The backdrop owns its canvas: it creates one inside `host` and removes it on
    * dispose. dispose() forces a context loss, so a canvas must never be reused by
    * the next Backdrop (React StrictMode mounts twice in dev and did exactly that).
    */
-  constructor(host: HTMLElement) {
+  constructor(host: HTMLElement, opts: { lineBoil: boolean } = { lineBoil: true }) {
     const canvas = document.createElement('canvas');
     host.prepend(canvas);
     this.canvas = canvas;
@@ -46,6 +48,8 @@ export class Backdrop {
     this.renderer.setPixelRatio(RES);
     paperAtmosphere(this.scene);
     this.world = buildWorld(this.scene);
+    // honour the player's "hand-drawn line wobble" setting, as the match does
+    this.world.materials.ink.uniforms.uBoil.value = opts.lineBoil ? 1 : 0;
 
     // a few bots loitering around the tower, facing out
     const kinds = Object.values(ENEMIES);
@@ -89,16 +93,17 @@ export class Backdrop {
 
   private draw(t: number) {
     const a = performance.now();
-    const p = orbitPose(t);
+    const p = orbitPose(t, this.pose);
     this.camera.position.set(p.x, p.y, p.z);
     this.camera.lookAt(p.lookX, p.lookY, p.lookZ);
     this.world.update(t);
-    this.bots.forEach((e, i) => {
+    for (let i = 0; i < this.bots.length; i++) {
       // idle sway: a cardboard cut-out shuffling on its stand
+      const e = this.bots[i];
       e.card.rotation.y = e.yaw + Math.sin(t * 0.6 + i) * 0.5;
       e.card.rotation.z = Math.sin(t * 2.2 + i * 1.7) * 0.05;
       e.card.position.y = Math.abs(Math.sin(t * 2.2 + i * 1.7)) * 0.08;
-    });
+    }
     this.renderer.render(this.scene, this.camera);
     this.lastFrameMs = performance.now() - a;
   }

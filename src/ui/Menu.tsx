@@ -27,7 +27,7 @@ import { SettingsPanel } from './panels/Settings';
 function MenuBackdrop() {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const b = new Backdrop(ref.current!); // creates and later removes its own canvas
+    const b = new Backdrop(ref.current!, { lineBoil: settings.get().lineBoil }); // creates and later removes its own canvas
     if (import.meta.env.DEV) (window as unknown as { __backdrop?: Backdrop }).__backdrop = b;
     return () => b.dispose();
   }, []);

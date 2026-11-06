@@ -82,7 +82,7 @@ export interface HudState {
   tactical: SkillHud;
   ultimate: SkillHud;
   buffs: { stat: string; t: number; max: number; color: string }[];
-  prompt: { key: string; arg?: string } | null;
+  prompt: { key: string } | null;
   killfeed: KillItem[];
   popups: Popup[];
   callouts: Callout[];
