@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Backdrop } from '../game/Backdrop';
 import {
   AiMagicIcon,
   Award01Icon,
@@ -21,6 +22,21 @@ import { LibraryPanel } from './panels/Library';
 import { LockerPanel } from './panels/Locker';
 import { BoardPanel } from './panels/Board';
 import { SettingsPanel } from './panels/Settings';
+
+/** The live arena behind the menu, blurred (#10). One Backdrop per mount; gone before the match starts. */
+function MenuBackdrop() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const b = new Backdrop(ref.current!); // creates and later removes its own canvas
+    if (import.meta.env.DEV) (window as unknown as { __backdrop?: Backdrop }).__backdrop = b;
+    return () => b.dispose();
+  }, []);
+  return (
+    <div ref={ref} className="menu__backdrop" aria-hidden="true">
+      <div className="menu__veil" />
+    </div>
+  );
+}
 
 export type Panel = 'arena' | 'forge' | 'library' | 'locker' | 'board' | 'graphics' | 'audio' | 'controls';
 
@@ -67,7 +83,7 @@ export function Menu({ onPlay, initial = 'arena' }: { onPlay: () => void; initia
 
   return (
     <div className="menu">
-      <div className="desk" aria-hidden="true" />
+      <MenuBackdrop />
       <aside className="menu__side">
         <div className="brand" style={{ '--rot': '-2deg' } as React.CSSProperties}>
           <h1 className="brand__title display">

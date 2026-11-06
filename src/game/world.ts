@@ -3,7 +3,20 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { CollisionWorld } from './collision';
 import { INK, kraft, notebookGround, paperGrain, rng, toonRamp } from './textures';
 
-export const ARENA_R = 96;
+import { ARENA_R } from './arena';
+
+export { ARENA_R };
+
+/** The page's light and air: paper background, fog, a warm sky and one sun. Shared by the match and the menu backdrop. */
+export function paperAtmosphere(scene: THREE.Scene) {
+  const paper = new THREE.Color('#efe6d2');
+  scene.background = paper;
+  scene.fog = new THREE.Fog(paper, 70, 215);
+  scene.add(new THREE.HemisphereLight('#fff8ea', '#cdb991', 1.25));
+  const sun = new THREE.DirectionalLight('#fffaf0', 1.7);
+  sun.position.set(40, 80, 25);
+  scene.add(sun);
+}
 
 /**
  * The Desk — a notebook page with stationery for terrain.
