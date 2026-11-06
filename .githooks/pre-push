@@ -22,8 +22,9 @@ if [ "$status" -ne 0 ]; then
   echo "" >&2
   echo "pre-push blocked by a T4 guard (above)." >&2
   echo "  Fix the cause, or push from a wip/ branch for a deliberate freeze." >&2
-  echo "  Bypassing with --no-verify is possible and discouraged: the same" >&2
-  echo "  checks run in CI, where they cannot be bypassed." >&2
+  echo "  Bypassing with --no-verify is possible and discouraged. CI cannot run on" >&2
+  echo "  this account right now (billing lock, #2): nothing behind this hook" >&2
+  echo "  re-checks a push, so a bypass here goes unchecked." >&2
 fi
 
 exit "$status"
