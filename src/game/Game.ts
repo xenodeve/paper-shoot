@@ -7,7 +7,7 @@ import { hud, initialHud, type HudState, type KillItem, type Popup, type Summary
 import { bakeMascot, crateFace, inkSplat, INK, type Wear } from './textures';
 import { pickupToast, type PickupEvent } from './toasts';
 import { buildViewModel, falloff, WEAPON_ORDER, WEAPONS, type WeaponDef, type WeaponId } from './weapons';
-import { ARENA_R, buildWorld, type World } from './world';
+import { ARENA_R, buildWorld, paperAtmosphere, type World } from './world';
 import type { Look, Quality } from '../profile';
 
 /* ------------------------------------------------------------------ *
@@ -291,14 +291,8 @@ export class Game {
     this.pixelScale = q === 'low' ? 0.7 : q === 'medium' ? 1 : q === 'high' ? 1.5 : 1.25;
     this.applyPixelRatio();
 
-    const paper = new THREE.Color('#efe6d2');
-    this.scene.background = paper;
-    this.scene.fog = new THREE.Fog(paper, 70, 215);
+    paperAtmosphere(this.scene);
     this.camera = new THREE.PerspectiveCamera(opts.fov, 1, 0.08, 260);
-    this.scene.add(new THREE.HemisphereLight('#fff8ea', '#cdb991', 1.25));
-    const sun = new THREE.DirectionalLight('#fffaf0', 1.7);
-    sun.position.set(40, 80, 25);
-    this.scene.add(sun);
     this.vmScene.add(new THREE.HemisphereLight('#fff8ea', '#b8a27a', 1.5));
     const vsun = new THREE.DirectionalLight('#ffffff', 1.4);
     vsun.position.set(1, 2, 1.5);
