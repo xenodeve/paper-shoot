@@ -356,7 +356,6 @@ function Hud({ crossRef, hitRef, mapRef, heard }: { crossRef: React.RefObject<HT
       {h.prompt ? (
         <div className="prompt">
           <span className="kbd">E</span> {t(h.prompt.key)}
-          {h.prompt.arg ? ` ${t(`weapon.${h.prompt.arg}`)}` : ''}
         </div>
       ) : null}
       {h.healing ? (
