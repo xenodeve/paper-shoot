@@ -248,6 +248,23 @@ export function ForgePanel() {
                 {result.via === 'ai' ? t('forge.via.ai', { model: result.model ?? 'AI' }) : t('forge.via.offline')}
                 {result.via === 'offline' && result.fallbackReason ? ` — ${t(`forge.offlineWhy.${fallbackKind(result.fallbackReason)}`)}` : ''}
               </p>
+              {result.skill.program ? (
+                <div className="panel-votes">
+                  <strong>{t('forge.panel.title', { n: result.skill.program.votes.filter(v => v.vote === 'pass').length })}</strong>
+                  <ul>
+                    {result.skill.program.votes.map(v => (
+                      <li key={v.model} className={v.vote === 'pass' ? 'is-pass' : 'is-reject'}>
+                        <span aria-hidden>{v.vote === 'pass' ? '✓' : '✗'}</span> <code>{v.model}</code>
+                        {v.reason ? <span className="muted"> — {v.reason}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                  <details>
+                    <summary className="tiny">{t('forge.panel.script')}</summary>
+                    <pre className="panel-votes__code">{result.skill.program.source}</pre>
+                  </details>
+                </div>
+              ) : null}
             </aside>
           </div>
         ) : null}

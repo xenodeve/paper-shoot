@@ -5,7 +5,8 @@ Each ADR captures one significant, hard-to-reverse decision: its context, what w
 | # | Title | Area | Status |
 |---|-------|------|--------|
 | [0001](0001-vanilla-three-engine-outside-react.md) | Vanilla three.js engine, React only for menus and HUD | Engine | Accepted |
-| [0002](0002-ai-skills-as-refereed-dsl.md) | AI-generated skills are a refereed JSON DSL, never code | Forge | Accepted |
+| [0002](0002-ai-skills-as-refereed-dsl.md) | AI-generated skills are a refereed JSON DSL, never code | Forge | Accepted (amended by 0003) |
+| [0003](0003-code-skills-sandboxed-and-reviewed.md) | AI-written skill scripts, sandboxed on the server, reviewed by a model panel | Forge | Accepted |
 
 ## Conventions
 

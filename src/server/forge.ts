@@ -1,6 +1,10 @@
 import { balanceSkill, EFFECT_TYPES, ICONS, POWER_CAP, type BalanceNote, type Skill, type Slot } from '../skills/balance.ts';
 import { offlineSkill } from '../skills/offline.ts';
 import { isBusy } from '../forgeReason.ts';
+import { codeForge } from './codeForge.ts';
+import { headers, newSession, pause, providerError } from './opencode.ts';
+
+export { providerError };
 
 /**
  * The forge endpoint, shared by the Vite dev middleware and the Bun server.
@@ -10,6 +14,8 @@ export interface ForgeEnv {
   apiKey?: string;
   baseUrl: string;
   model: string;
+  /** try an AI-written, sandboxed, panel-reviewed skill first (issue #18) */
+  codeSkills?: boolean;
 }
 
 export interface ForgeRequest {
@@ -29,7 +35,8 @@ export function envFrom(source: Record<string, string | undefined>): ForgeEnv {
   return {
     apiKey: source.OPENCODE_GO_API_KEY || undefined,
     baseUrl: (source.OPENCODE_GO_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
-    model: source.OPENCODE_GO_MODEL || DEFAULT_MODEL
+    model: source.OPENCODE_GO_MODEL || DEFAULT_MODEL,
+    codeSkills: source.PAPER_SHOOT_CODE_SKILLS !== '0'
   };
 }
 
@@ -68,25 +75,14 @@ function extractJson(text: string): unknown {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-const USER_AGENT = 'paper-shoot/0.1';
-const newSession = () => `paper-shoot-${crypto.randomUUID()}`;
-
 /**
- * The HTTP request for one forge call. OpenCode Go routes on a per-conversation
- * `x-opencode-session` and asks clients to name themselves in `user-agent`
- * (docs: /v2/docs/console/go/); without the session header it answers
- * 400 MissingSessionID (issue #14). One forge call is one conversation, so its
- * retries share the session id `forge()` passes in.
+ * The HTTP request for one data-forge call (headers: `opencode.ts`). One forge call is one
+ * conversation, so its retries share the session id `forge()` passes in.
  */
 export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session: string) {
   return {
     url: `${env.baseUrl}/chat/completions`,
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${env.apiKey}`,
-      'user-agent': USER_AGENT,
-      'x-opencode-session': session
-    },
+    headers: headers(env, session),
     body: JSON.stringify({
       model: env.model,
       temperature: 0.9,
@@ -100,17 +96,6 @@ export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session: str
       ]
     })
   };
-}
-
-/** `http-<status>` plus the provider's error type when it sent one, so a failure says why. */
-export function providerError(status: number, body: string): string {
-  try {
-    const t = (JSON.parse(body) as { error?: { type?: unknown } }).error?.type;
-    if (typeof t === 'string' && /^[\w.-]{1,60}$/.test(t)) return `http-${status}:${t}`;
-  } catch {
-    /* not JSON */
-  }
-  return `http-${status}`;
 }
 
 async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal, session: string): Promise<unknown> {
@@ -135,15 +120,18 @@ export function parseRequest(body: unknown): ForgeRequest | null {
 
 /** Only a busy provider (`isBusy`: 429, 5xx) is worth another try; anything else is a wrong request. */
 const ATTEMPTS = 3;
-/** A backoff that ends early when the forge's 30 s budget runs out. */
-const pause = (ms: number, signal: AbortSignal) =>
-  new Promise<void>(done => {
-    const t = setTimeout(done, ms);
-    signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true });
-  });
 
 export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelayMs?: number } = {}): Promise<ForgeResponse> {
   let fallbackReason: string | undefined;
+  if (env.apiKey && env.codeSkills) {
+    const c = await codeForge(req, env, opts);
+    if (c.ok) {
+      const r = balanceSkill(c.input, req.slot, 'ai');
+      if (r.ok && r.skill.program) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: c.designer };
+    }
+    // not approved: no script is used anywhere; the data forge below takes over
+    console.info(`[forge] code skill not used: ${c.ok ? 'failed re-referee' : c.reason}`);
+  }
   if (env.apiKey) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30000);
