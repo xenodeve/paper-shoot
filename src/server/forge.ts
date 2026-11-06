@@ -1,5 +1,6 @@
 import { balanceSkill, EFFECT_TYPES, ICONS, POWER_CAP, type BalanceNote, type Skill, type Slot } from '../skills/balance.ts';
 import { offlineSkill } from '../skills/offline.ts';
+import { isBusy } from '../forgeReason.ts';
 
 /**
  * The forge endpoint, shared by the Vite dev middleware and the Bun server.
@@ -67,11 +68,25 @@ function extractJson(text: string): unknown {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal): Promise<unknown> {
-  const res = await fetch(`${env.baseUrl}/chat/completions`, {
-    method: 'POST',
-    signal,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${env.apiKey}` },
+const USER_AGENT = 'paper-shoot/0.1';
+const newSession = () => `paper-shoot-${crypto.randomUUID()}`;
+
+/**
+ * The HTTP request for one forge call. OpenCode Go routes on a per-conversation
+ * `x-opencode-session` and asks clients to name themselves in `user-agent`
+ * (docs: /v2/docs/console/go/); without the session header it answers
+ * 400 MissingSessionID (issue #14). One forge call is one conversation, so its
+ * retries share the session id `forge()` passes in.
+ */
+export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session: string) {
+  return {
+    url: `${env.baseUrl}/chat/completions`,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${env.apiKey}`,
+      'user-agent': USER_AGENT,
+      'x-opencode-session': session
+    },
     body: JSON.stringify({
       model: env.model,
       temperature: 0.9,
@@ -84,8 +99,24 @@ async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal):
         }
       ]
     })
-  });
-  if (!res.ok) throw new Error(`http-${res.status}`);
+  };
+}
+
+/** `http-<status>` plus the provider's error type when it sent one, so a failure says why. */
+export function providerError(status: number, body: string): string {
+  try {
+    const t = (JSON.parse(body) as { error?: { type?: unknown } }).error?.type;
+    if (typeof t === 'string' && /^[\w.-]{1,60}$/.test(t)) return `http-${status}:${t}`;
+  } catch {
+    /* not JSON */
+  }
+  return `http-${status}`;
+}
+
+async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal, session: string): Promise<unknown> {
+  const call = buildModelRequest(req, env, session);
+  const res = await fetch(call.url, { method: 'POST', signal, headers: call.headers, body: call.body });
+  if (!res.ok) throw new Error(providerError(res.status, await res.text().catch(() => '')));
   const data = (await res.json()) as { choices?: { message?: { content?: string; reasoning_content?: string } }[] };
   const msg = data.choices?.[0]?.message;
   const content = msg?.content || msg?.reasoning_content || '';
@@ -102,18 +133,38 @@ export function parseRequest(body: unknown): ForgeRequest | null {
   return { prompt, slot, lang };
 }
 
-export async function forge(req: ForgeRequest, env: ForgeEnv): Promise<ForgeResponse> {
+/** Only a busy provider (`isBusy`: 429, 5xx) is worth another try; anything else is a wrong request. */
+const ATTEMPTS = 3;
+/** A backoff that ends early when the forge's 30 s budget runs out. */
+const pause = (ms: number, signal: AbortSignal) =>
+  new Promise<void>(done => {
+    const t = setTimeout(done, ms);
+    signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true });
+  });
+
+export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelayMs?: number } = {}): Promise<ForgeResponse> {
   let fallbackReason: string | undefined;
   if (env.apiKey) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30000);
+    const delay = opts.retryDelayMs ?? 900;
+    const session = newSession();
     try {
-      const raw = await callModel(req, env, ctrl.signal);
-      const r = balanceSkill(raw, req.slot, 'ai');
-      if (r.ok) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: env.model };
-      fallbackReason = r.error;
-    } catch (err) {
-      fallbackReason = ctrl.signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
+      // OpenCode Go answers an intermittent 429 server_error (issue #14): back off and retry
+      // inside the same 30 s budget before falling back to the offline forge.
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        try {
+          const raw = await callModel(req, env, ctrl.signal, session);
+          const r = balanceSkill(raw, req.slot, 'ai');
+          if (r.ok) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: env.model };
+          fallbackReason = r.error;
+          break;
+        } catch (err) {
+          fallbackReason = ctrl.signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
+          if (!isBusy(fallbackReason) || attempt === ATTEMPTS) break;
+          await pause(delay * attempt, ctrl.signal);
+        }
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -125,7 +176,8 @@ export async function forge(req: ForgeRequest, env: ForgeEnv): Promise<ForgeResp
   return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'offline', fallbackReason };
 }
 
-/** A tiny rate limit so a stuck client can't burn the subscription. */
+/** A tiny rate limit so a stuck client can't burn the subscription. It counts forges,
+ *  not provider calls: with retries one forge is up to ATTEMPTS calls. */
 const hits = new Map<string, number[]>();
 export function allow(ip: string, perMinute = 12): boolean {
   const now = Date.now();
