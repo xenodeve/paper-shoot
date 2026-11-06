@@ -63,7 +63,7 @@ tests/             bun test suites
 ## Enforcement that is actually installed
 
 - **Claude hooks** (`.claude/settings.json` + `.claude/hooks/`, marker `.claude/t4.json`): session-start injects `using-t4`; `t4-gate` denies `gh pr create` without an issue reference and dangerous git, and runs `verify` before `gh pr merge`.
-- **Local ship gate:** `.claude/t4.json` `"verify"` = `bun run lint && bun run typecheck && bun test && bun run build` — a literal prefix of CI.
+- **Local ship gate:** `.claude/t4.json` `"verify"` = `PATH="$HOME/.bun/bin:$PATH" && bun run lint && bun run typecheck && bun test && bun run build` (bun is not on the hook shell's PATH on the developer's machine) — the whole suite; with CI unable to run (#2) this command, which t4-gate runs before a merge, is the only automated check behind one.
 - **Git guards** (`.githooks/`): issue reference, tree budget, `T4-Gates:` trailer. Enable per clone: `git config core.hooksPath .githooks`.
 - **CI is installed but cannot run** (`.github/workflows/t4-verify.yml`): every job fails at provisioning with "account is locked due to a billing issue" (2026-11-06, #2). The ruleset "T4 main gate" (id 26674811) keeps only what needs no CI: PR required, no force-push, no deletion of `main`. **No status checks are required.** `requireGreenCI` stays `false` (with `true` every merge would be denied forever).
 - **So a merged PR here means "the author ran `verify`", not "CI passed"** — nothing about the merge distinguishes them, and none of this binds a human merging on the web. Restoring the required checks is tracked in #2.
