@@ -81,3 +81,14 @@ describe('balanceSkill', () => {
     expect(r.skill.color).toMatch(/^#[0-9a-f]{6}$/i);
   });
 });
+
+describe('effect types are plain own keys (security-review, PR #19)', () => {
+  test('a non-string type that coerces to a real key is not an effect, and power is never non-finite', () => {
+    for (const type of [['area'], { toString: () => 'area' }, 'constructor']) {
+      const r = balanceSkill({ name: 'x', effects: [{ type, radius: 3 }, { type: 'dash', distance: 8 }] }, 'tactical');
+      expect(r.ok && r.skill.effects.map(e => e.type)).toEqual(['dash']);
+      expect(r.ok && Number.isFinite(r.power)).toBe(true);
+    }
+    expect(balanceSkill({ name: 'x', effects: [{ type: ['area'], radius: 3 }] }, 'tactical').ok).toBe(false);
+  });
+});

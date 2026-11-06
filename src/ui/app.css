@@ -361,6 +361,44 @@ h3 {
   margin: 2px 0;
   font-size: 13.5px;
 }
+/* the AI panel's votes on a scripted skill (issue #18) */
+.panel-votes {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1.5px dashed rgba(31, 42, 68, 0.25);
+}
+.panel-votes ul {
+  list-style: none;
+  padding-left: 0;
+}
+.panel-votes li {
+  overflow-wrap: anywhere;
+}
+.panel-votes li > span[aria-hidden] {
+  display: inline-block;
+  width: 1.1em;
+  font-weight: 700;
+}
+.panel-votes .is-pass > span[aria-hidden] {
+  color: #2f9e5b;
+}
+.panel-votes .is-reject > span[aria-hidden] {
+  color: #e5533d;
+}
+.panel-votes code {
+  font-size: 12px;
+}
+.panel-votes__code {
+  max-height: 180px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+}
 
 /* ---------- Skill card ---------- */
 .skill-card {

@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
-import { allow, envFrom, forge, parseRequest } from './src/server/forge.ts';
+import { allow, envFrom, forge, forgeStream, parseRequest, wantsStream } from './src/server/forge.ts';
 
 /** Serves /api/* inside the dev server so one `bun dev` runs everything. */
 function forgeApi(env: Record<string, string>): Plugin {
@@ -30,6 +30,13 @@ function forgeApi(env: Record<string, string>): Plugin {
             parsed = null;
           }
           if (!parsed) return send(400, { ok: false, error: 'bad-request' });
+          if (wantsStream(req.headers.accept)) {
+            res.statusCode = 200;
+            res.setHeader('content-type', 'application/x-ndjson');
+            res.setHeader('cache-control', 'no-cache');
+            for await (const chunk of forgeStream(parsed, forgeEnv)) res.write(chunk);
+            return res.end();
+          }
           return send(200, await forge(parsed, forgeEnv));
         }
         send(404, { ok: false, error: 'not-found' });

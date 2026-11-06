@@ -6,6 +6,32 @@
 
 ---
 
+## Code skills: AI scripts, server sandbox, 5-model panel (2026-11-06, /tdd, branch `feat/18-code-skills`)
+
+**Goal:** #18 — the AI builds the skill itself (developer: "ให้ทำใน sandbox และใช้ AI อีก 2-3 ตัวรุมตรวจ"), not only picks from ten effects.
+
+**Shipped:** `src/skills/program.ts` (24 contexts, `skillRow`), `checkProgram` in `balance.ts`, `src/server/codeReferee.ts` (QuickJS table builder), `codeForge.ts` + `codePrompts.ts` (designer → referee → panel, rules D1–D13 / P1–P7), `opencode.ts` (shared client), Game plays the row at cast with delayed effects, Forge panel shows votes and the script. ADR 0003; CLAUDE.md rule amended.
+
+**Validation:** `bun test` 84 pass; 14 attack scripts blocked; QuickJS absent from the client bundle (grep of `dist/assets`). Live: 2 of 3 ideas approved 5/5 through `forge()`; one designer timeout fell back to the data forge. Browser: see PR.
+
+**Also:** real forge progress over NDJSON (plan → code → logic → review → draft), Bun idleTimeout 120, one 60 s budget, cancel on hang-up. Reviews: security-review (inherited / non-string effect types priced as NaN/Infinity — fixed), scrutinize, code-review, simplify.
+
+**Next:** power floor + designer retry with referee feedback (ADR 0003 follow-ups); route the data forge through `chat()` (needs a `reasoning_content` fallback first).
+
+---
+
+## Forge reaches OpenCode Go (2026-11-06, /debug-mantra, PRs #15 + #17)
+
+**Goal:** #14 — every forge fell back offline; #16 — approval wording.
+
+**Root cause:** OpenCode Go needs `x-opencode-session`; without it, 400 MissingSessionID. Then intermittent 429s.
+
+**Shipped:** session header (one per forge, shared by retries), retry on 429/5xx inside 30 s, `src/forgeReason.ts` (one busy rule for server + UI), `forge.offlineWhy.busy`; `forge.noNotes` → "อนุมัติสกิลนี้".
+
+**Validation:** live 6/6 via AI; 33 tests; code-review + scrutinize + simplify + security-review before merge.
+
+---
+
 ## Aim-down-sight overlays for every gun (2026-11-06, /karpathy-guidelines, branch `fix/8-sights`)
 
 **Goal:** #8 — aiming with the Ruler Rifle hid the gun and the crosshair and showed nothing; the developer also asked for a sight on every gun.

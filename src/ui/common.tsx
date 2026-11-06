@@ -100,6 +100,7 @@ export function SkillCard({ skill, actions, highlight, style }: { skill: Skill; 
         </div>
       </header>
       {skill.description ? <p className="skill-card__desc">{skill.description}</p> : null}
+      {skill.program ? <p className="tiny muted">{t('skill.strongestCase')}</p> : null}
       <ul className="skill-card__fx">
         {skill.effects.map((fx, i) => (
           <li key={i}>{describeEffect(fx, t)}</li>

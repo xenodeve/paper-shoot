@@ -11,6 +11,7 @@ import { buildViewModel, falloff, WEAPON_ORDER, WEAPONS, type WeaponDef, type We
 import { ARENA_R } from './arena';
 import { buildWorld, paperAtmosphere, type World } from './world';
 import type { Look, Quality } from '../profile';
+import { ctxFrom, NEAR_RADIUS, skillRow, type Program } from '../skills/program';
 
 /* ------------------------------------------------------------------ *
  *  Paper Shoot — the engine.
@@ -231,6 +232,8 @@ export class Game {
   private tacCd = 0;
   private ultCd: number;
   private buffs: { stat: string; mult: number; t: number; max: number; color: string }[] = [];
+  /** a code skill's delayed effects (`api.after`), due at `runTime >= at`; only ticks while alive */
+  private skillQueue: { at: number; fx: Effect; s: Skill }[] = [];
   private areas: Area[] = [];
   private walls: WallFx[] = [];
   private pulls: Pull[] = [];
@@ -1801,8 +1804,23 @@ export class Game {
     if (slot === 'tactical') this.tacCd = s.cooldown;
     else this.ultCd = s.cooldown;
     audio.play(slot === 'tactical' ? 'skill' : 'ult');
-    for (const fx of s.effects) this.applyEffect(fx, s);
+    if (s.program) this.castProgram(s, s.program);
+    else for (const fx of s.effects) this.applyEffect(fx, s);
     this.p.shake = Math.max(this.p.shake, slot === 'ultimate' ? 0.3 : 0.1);
+  }
+
+  /** A code skill plays the row its referee measured for this moment (issue #18, ADR 0003). */
+  private castProgram(s: Skill, program: Program) {
+    const p = this.p;
+    let near = 0;
+    for (const e of this.enemies) {
+      if (e.state === 'dying' || e.state === 'pop') continue;
+      if (e.pos.distanceToSquared(p.pos) < NEAR_RADIUS * NEAR_RADIUS) near++;
+    }
+    for (const fx of skillRow(program, ctxFrom(p.hp, p.shield, near, this.time - p.lastHurt))) {
+      if (fx.at <= 0) this.applyEffect(fx, s);
+      else this.skillQueue.push({ at: this.runTime + fx.at, fx, s });
+    }
   }
 
   /** Where the crosshair lands on the world, up to `max` away. */
@@ -1958,6 +1976,12 @@ export class Game {
     this.tacCd = Math.max(0, this.tacCd - dt);
     this.ultCd = Math.max(0, this.ultCd - dt);
     for (let i = this.buffs.length - 1; i >= 0; i--) if ((this.buffs[i].t -= dt) <= 0) this.buffs.splice(i, 1);
+    for (let i = this.skillQueue.length - 1; i >= 0; i--) {
+      const q = this.skillQueue[i];
+      if (q.at > this.runTime) continue;
+      this.skillQueue.splice(i, 1);
+      this.applyEffect(q.fx, q.s);
+    }
 
     for (let i = this.areas.length - 1; i >= 0; i--) {
       const a = this.areas[i];

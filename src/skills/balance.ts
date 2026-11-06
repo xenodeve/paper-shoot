@@ -12,6 +12,8 @@
  * saved skills loaded from storage) — the same rules on both sides.
  */
 
+import { ALL_CTX, MAX_DELAY_S, MAX_NUMBER, MAX_ROW_EFFECTS, type Program, type TimedEffect, type Vote } from './program';
+
 export type Slot = 'tactical' | 'ultimate';
 
 export type BuffStat = 'speed' | 'damage' | 'fireRate' | 'reload';
@@ -43,6 +45,8 @@ export interface Skill {
   cooldown: number;
   effects: Effect[];
   source: 'ai' | 'offline' | 'builtin';
+  /** A code skill's effect table (issue #18). When present the game plays it instead of `effects`. */
+  program?: Program;
 }
 
 export interface BalanceNote {
@@ -127,11 +131,22 @@ export function effectPower(e: Effect): number {
       return e.radius * e.duration * 0.05;
     case 'pull':
       return e.radius * e.strength * 2;
+    default:
+      return Infinity; // never cheaper than the budget
   }
 }
 
-export function skillPower(s: Pick<Skill, 'effects'>): number {
-  return s.effects.reduce((sum, e) => sum + effectPower(e), 0);
+/** The power of a list of effects, in budget points. */
+function effectsPower(effects: readonly Effect[]): number {
+  return effects.reduce((sum, e) => sum + effectPower(e), 0);
+}
+
+/** What a skill is priced at: a code skill's strongest row (its card shows a 3-effect preview), else its effects. */
+export function skillPower(s: { effects: readonly Effect[]; program?: Program }): number {
+  if (!s.program) return effectsPower(s.effects);
+  let worst = 0;
+  for (const row of s.program.table) worst = Math.max(worst, effectsPower(row));
+  return worst;
 }
 
 const round = (v: number, step: number) => Math.round(v / step) * step;
@@ -183,10 +198,12 @@ function num(v: unknown): number | null {
 function readEffect(raw: unknown, i: number, notes: BalanceNote[]): Effect | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const type = r.type as EffectType;
-  const spec = FIELDS[type];
-  if (!spec) {
-    notes.push({ field: `effects[${i}]`, reason: 'unknown', from: String(r.type ?? '?').slice(0, 24) });
+  // a plain string naming an own key only: an inherited name ("constructor") or a value that
+  // coerces to a key (["area"]) is not an effect — either would price as NaN or Infinity
+  const type = typeof r.type === 'string' && Object.hasOwn(FIELDS, r.type) ? (r.type as EffectType) : null;
+  const spec = type ? FIELDS[type] : undefined;
+  if (!type || !spec) {
+    notes.push({ field: `effects[${i}]`, reason: 'unknown', from: (typeof r.type === 'string' ? r.type : '?').slice(0, 24) });
     return null;
   }
   const out: Record<string, unknown> = { type };
@@ -230,6 +247,45 @@ function snap(effects: Effect[]) {
   }
 }
 
+export type ProgramResult = { ok: true; program: Program; power: number; worstRow: number } | { ok: false; error: string };
+
+/**
+ * The referee for a code skill's effect table. Every row is clamped to the effect ranges
+ * and must fit the slot budget on its own: power is the worst row, never an average.
+ */
+export function checkProgram(input: unknown, slot: Slot): ProgramResult {
+  if (!input || typeof input !== 'object') return { ok: false, error: 'not-an-object' };
+  const raw = input as Record<string, unknown>;
+  if (!Array.isArray(raw.table) || raw.table.length !== ALL_CTX.length) return { ok: false, error: 'bad-table' };
+  const cap = POWER_CAP[slot];
+  const table: TimedEffect[][] = [];
+  let power = 0;
+  let worstRow = 0;
+  for (const [r, rowRaw] of (raw.table as unknown[]).entries()) {
+    if (!Array.isArray(rowRaw) || rowRaw.length > MAX_ROW_EFFECTS) return { ok: false, error: 'bad-row' };
+    const row: TimedEffect[] = [];
+    for (const [i, e] of rowRaw.entries()) {
+      // clamping is for typos; a negative or absurd number means the script is wrong
+      if (e && typeof e === 'object' && Object.values(e).some(v => typeof v === 'number' && !(v >= 0 && v <= MAX_NUMBER))) return { ok: false, error: 'bad-number' };
+      const fx = readEffect(e, i, []);
+      const at = num((e as Record<string, unknown> | null)?.at);
+      if (!fx || at === null || at < 0 || at > MAX_DELAY_S) return { ok: false, error: 'bad-effect' };
+      row.push({ ...fx, at: round(at, 0.05) });
+    }
+    const p = effectsPower(row);
+    if (!Number.isFinite(p)) return { ok: false, error: 'bad-power' };
+    if (p > cap + 1e-6) return { ok: false, error: 'over-budget' };
+    if (p > power) (power = p), (worstRow = r);
+    table.push(row);
+  }
+  if (power <= 0) return { ok: false, error: 'does-nothing' };
+  const votes: Vote[] = (Array.isArray(raw.votes) ? raw.votes : [])
+    .slice(0, 8)
+    .filter((v): v is Record<string, unknown> => !!v && typeof v === 'object' && (v.vote === 'pass' || v.vote === 'reject'))
+    .map(v => ({ model: cleanText(v.model, 40, '?'), vote: v.vote as Vote['vote'], reason: cleanText(v.reason, 120, '') }));
+  return { ok: true, power, worstRow, program: { source: typeof raw.source === 'string' ? raw.source.slice(0, 4000) : '', table, votes } };
+}
+
 let counter = 0;
 const makeId = () => `sk_${Date.now().toString(36)}_${(counter++).toString(36)}`;
 
@@ -238,11 +294,20 @@ export function balanceSkill(input: unknown, slot: Slot, source: Skill['source']
   const raw = input as Record<string, unknown>;
   const notes: BalanceNote[] = [];
 
-  const list = Array.isArray(raw.effects) ? raw.effects : [];
+  // A code skill: its table is the real skill; the card shows its strongest row.
+  let program: Extract<ProgramResult, { ok: true }> | null = null;
+  if (raw.program !== undefined) {
+    const pr = checkProgram(raw.program, slot);
+    if (pr.ok) program = pr;
+    else notes.push({ field: 'program', reason: 'dropped', from: pr.error });
+  }
+
+  const list = program ? program.program.table[program.worstRow] : Array.isArray(raw.effects) ? raw.effects : [];
   const effects: Effect[] = [];
   list.forEach((e, i) => {
     if (effects.length >= MAX_EFFECTS) {
-      notes.push({ field: `effects[${i}]`, reason: 'dropped' });
+      // a program's card only previews its strongest row; nothing is dropped from the skill
+      if (!program) notes.push({ field: `effects[${i}]`, reason: 'dropped' });
       return;
     }
     const fx = readEffect(e, i, notes);
@@ -252,19 +317,19 @@ export function balanceSkill(input: unknown, slot: Slot, source: Skill['source']
 
   // Spend the budget: shrink until it fits; if the floors alone overflow, drop the last effect.
   const cap = POWER_CAP[slot];
-  const before = skillPower({ effects });
+  const before = effectsPower(effects);
   if (before > cap) {
     const snapshot = JSON.stringify(effects);
-    for (let guard = 0; guard < 60 && skillPower({ effects }) > cap; guard++) {
+    for (let guard = 0; guard < 60 && effectsPower(effects) > cap; guard++) {
       shrink(effects, 0.92);
-      if (guard > 40 && effects.length > 1 && skillPower({ effects }) > cap) {
+      if (guard > 40 && effects.length > 1 && effectsPower(effects) > cap) {
         notes.push({ field: `effects[${effects.length - 1}]`, reason: 'dropped' });
         effects.pop();
       }
     }
     snap(effects);
     // Rounding may have nudged a hair over the cap; trim the biggest scalable field down one step.
-    for (let guard = 0; guard < 20 && skillPower({ effects }) > cap; guard++) {
+    for (let guard = 0; guard < 20 && effectsPower(effects) > cap; guard++) {
       shrink(effects, 0.97);
       snap(effects);
     }
@@ -278,7 +343,8 @@ export function balanceSkill(input: unknown, slot: Slot, source: Skill['source']
     });
   }
 
-  const power = skillPower({ effects });
+  const power = program ? program.power : effectsPower(effects);
+  if (!Number.isFinite(power)) return { ok: false, error: 'bad-power' };
   const cd = COOLDOWN[slot];
   const floor = clamp(cd.base + power * cd.perPower, cd.min, cd.max);
   const asked = num(raw.cooldown);
@@ -302,7 +368,8 @@ export function balanceSkill(input: unknown, slot: Slot, source: Skill['source']
       color,
       cooldown,
       effects,
-      source
+      source,
+      ...(program ? { program: program.program } : {})
     }
   };
 }

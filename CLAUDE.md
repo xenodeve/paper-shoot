@@ -71,7 +71,8 @@ tests/             bun test suites
 ## Hard rules for this codebase
 
 - **Performance budget is a feature.** No allocation in the frame loop (reuse scratch vectors), no new draw call per entity where an `InstancedMesh` pool fits, no shadow maps or post-processing. Check the HUD fps readout after any engine change.
-- **AI output is data, never code.** Anything from the model goes through `balanceSkill` on the server **and** again in the browser **and** again when loaded from storage. Never widen the effect list or a range without updating `tests/balance.test.ts`.
+- **AI output reaches the game as data, never code.** Anything from the model goes through `balanceSkill` on the server **and** again in the browser **and** again when loaded from storage. Never widen the effect list or a range without updating `tests/balance.test.ts`.
+- **AI-written skill scripts run only in the server's QuickJS sandbox** (`src/server/codeReferee.ts`, ADR 0003): the game receives the effect table they produced, re-checked by `checkProgram`. Never import `quickjs-emscripten` or `src/server/*` from client code, never `eval` a script, and never let the panel's vote stand in for the referee — it can only veto.
 - **The OpenCode Go key lives only on the server** (`.env`, read by `src/server/forge.ts`). Never a `VITE_*` variable, never in client code.
 - **Original IP only.** Genre mechanics are fine; no names, characters, weapons or UI copied from an existing game.
 - **TH/EN:** every user-facing string goes through `src/i18n.ts`, both languages.

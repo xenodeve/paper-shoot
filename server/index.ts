@@ -3,7 +3,7 @@
  * Serves the built game from ./dist and the forge API, with the key kept here.
  */
 import { join, normalize } from 'node:path';
-import { allow, envFrom, forge, parseRequest } from '../src/server/forge.ts';
+import { allow, envFrom, forge, forgeStream, parseRequest, wantsStream } from '../src/server/forge.ts';
 
 const env = envFrom(process.env);
 const root = join(import.meta.dir, '..', 'dist');
@@ -14,6 +14,8 @@ const json = (status: number, body: unknown) =>
 
 Bun.serve({
   port,
+  // a code-skill forge takes 20–60 s; Bun's default would drop it at 10 s of silence
+  idleTimeout: 120,
   async fetch(req, server) {
     const url = new URL(req.url);
     if (url.pathname === '/api/health') return json(200, { ai: Boolean(env.apiKey), model: env.model });
@@ -28,6 +30,8 @@ Bun.serve({
         parsed = null;
       }
       if (!parsed) return json(400, { ok: false, error: 'bad-request' });
+      if (wantsStream(req.headers.get('accept')))
+        return new Response(forgeStream(parsed, env), { headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache' } });
       return json(200, await forge(parsed, env));
     }
     if (url.pathname.startsWith('/api/')) return json(404, { ok: false, error: 'not-found' });

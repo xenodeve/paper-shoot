@@ -1,6 +1,10 @@
 import { balanceSkill, EFFECT_TYPES, ICONS, POWER_CAP, type BalanceNote, type Skill, type Slot } from '../skills/balance.ts';
 import { offlineSkill } from '../skills/offline.ts';
 import { isBusy } from '../forgeReason.ts';
+import { codeForge, type CodeForgeOptions, type ForgeEvent } from './codeForge.ts';
+import { headers, newSession, pause, providerError } from './opencode.ts';
+
+export { providerError, type ForgeEvent };
 
 /**
  * The forge endpoint, shared by the Vite dev middleware and the Bun server.
@@ -10,6 +14,8 @@ export interface ForgeEnv {
   apiKey?: string;
   baseUrl: string;
   model: string;
+  /** try an AI-written, sandboxed, panel-reviewed skill first (issue #18) */
+  codeSkills?: boolean;
 }
 
 export interface ForgeRequest {
@@ -29,7 +35,8 @@ export function envFrom(source: Record<string, string | undefined>): ForgeEnv {
   return {
     apiKey: source.OPENCODE_GO_API_KEY || undefined,
     baseUrl: (source.OPENCODE_GO_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
-    model: source.OPENCODE_GO_MODEL || DEFAULT_MODEL
+    model: source.OPENCODE_GO_MODEL || DEFAULT_MODEL,
+    codeSkills: source.PAPER_SHOOT_CODE_SKILLS !== '0'
   };
 }
 
@@ -68,25 +75,14 @@ function extractJson(text: string): unknown {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-const USER_AGENT = 'paper-shoot/0.1';
-const newSession = () => `paper-shoot-${crypto.randomUUID()}`;
-
 /**
- * The HTTP request for one forge call. OpenCode Go routes on a per-conversation
- * `x-opencode-session` and asks clients to name themselves in `user-agent`
- * (docs: /v2/docs/console/go/); without the session header it answers
- * 400 MissingSessionID (issue #14). One forge call is one conversation, so its
- * retries share the session id `forge()` passes in.
+ * The HTTP request for one data-forge call (headers: `opencode.ts`). One forge call is one
+ * conversation, so its retries share the session id `forge()` passes in.
  */
 export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session: string) {
   return {
     url: `${env.baseUrl}/chat/completions`,
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${env.apiKey}`,
-      'user-agent': USER_AGENT,
-      'x-opencode-session': session
-    },
+    headers: headers(env, session),
     body: JSON.stringify({
       model: env.model,
       temperature: 0.9,
@@ -100,17 +96,6 @@ export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session: str
       ]
     })
   };
-}
-
-/** `http-<status>` plus the provider's error type when it sent one, so a failure says why. */
-export function providerError(status: number, body: string): string {
-  try {
-    const t = (JSON.parse(body) as { error?: { type?: unknown } }).error?.type;
-    if (typeof t === 'string' && /^[\w.-]{1,60}$/.test(t)) return `http-${status}:${t}`;
-  } catch {
-    /* not JSON */
-  }
-  return `http-${status}`;
 }
 
 async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal, session: string): Promise<unknown> {
@@ -135,45 +120,97 @@ export function parseRequest(body: unknown): ForgeRequest | null {
 
 /** Only a busy provider (`isBusy`: 429, 5xx) is worth another try; anything else is a wrong request. */
 const ATTEMPTS = 3;
-/** A backoff that ends early when the forge's 30 s budget runs out. */
-const pause = (ms: number, signal: AbortSignal) =>
-  new Promise<void>(done => {
-    const t = setTimeout(done, ms);
-    signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true });
-  });
+/** The whole forge, code path and data fallback together, stays inside this. */
+const TOTAL_MS = 60000;
+const DATA_MS = 30000;
+/** The code path failed because the provider did (not the script): the data path would only wait again. */
+const providerDown = (reason: string) => /^designer(-timeout$|:http-)/.test(reason);
 
-export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelayMs?: number } = {}): Promise<ForgeResponse> {
+export async function forge(req: ForgeRequest, env: ForgeEnv, opts: CodeForgeOptions = {}): Promise<ForgeResponse> {
+  // one budget for everything, also ended by the caller (a client that hung up)
+  const total = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(TOTAL_MS)]) : AbortSignal.timeout(TOTAL_MS);
   let fallbackReason: string | undefined;
-  if (env.apiKey) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30000);
+  let tryData = Boolean(env.apiKey);
+  if (env.apiKey && env.codeSkills) {
+    const c = await codeForge(req, env, { ...opts, signal: total });
+    if (c.ok) {
+      const r = balanceSkill(c.input, req.slot, 'ai');
+      if (r.ok && r.skill.program) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: c.designer };
+    }
+    // not approved: no script is used anywhere; the data forge below takes over
+    console.info(`[forge] code skill not used: ${c.ok ? 'failed re-referee' : c.reason}`);
+    if (!c.ok && (providerDown(c.reason) || c.reason === 'cancelled')) {
+      tryData = false;
+      fallbackReason = c.reason === 'designer-timeout' ? 'timeout' : c.reason.replace(/^designer:/, '');
+    }
+  }
+  opts.onEvent?.({ type: 'stage', stage: 'draft' });
+  if (tryData && !total.aborted) {
+    const signal = AbortSignal.any([total, AbortSignal.timeout(DATA_MS)]);
     const delay = opts.retryDelayMs ?? 900;
     const session = newSession();
-    try {
+    {
       // OpenCode Go answers an intermittent 429 server_error (issue #14): back off and retry
       // inside the same 30 s budget before falling back to the offline forge.
       for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
         try {
-          const raw = await callModel(req, env, ctrl.signal, session);
+          const raw = await callModel(req, env, signal, session);
           const r = balanceSkill(raw, req.slot, 'ai');
           if (r.ok) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: env.model };
           fallbackReason = r.error;
           break;
         } catch (err) {
-          fallbackReason = ctrl.signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
+          fallbackReason = signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
           if (!isBusy(fallbackReason) || attempt === ATTEMPTS) break;
-          await pause(delay * attempt, ctrl.signal);
+          await pause(delay * attempt, signal);
         }
       }
-    } finally {
-      clearTimeout(timer);
     }
-  } else {
+  } else if (!env.apiKey) {
     fallbackReason = 'no-key';
+  } else if (!fallbackReason) {
+    fallbackReason = 'timeout';
   }
   const r = balanceSkill(offlineSkill(req.prompt, req.slot, req.lang), req.slot, 'offline');
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'offline', fallbackReason };
+}
+
+/** A client that sends `accept: application/x-ndjson` gets progress as it happens. */
+export const wantsStream = (accept: string | null | undefined) => !!accept && accept.includes('application/x-ndjson');
+
+/**
+ * The forge as NDJSON: one `ForgeEvent` per line while it works, then
+ * `{type:'result', response}`. The steady trickle of lines also keeps a slow
+ * forge's connection alive through proxies and idle timeouts.
+ */
+export function forgeStream(req: ForgeRequest, env: ForgeEnv, opts: CodeForgeOptions = {}): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  const hangUp = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, hangUp.signal]) : hangUp.signal;
+  return new ReadableStream({
+    async start(ctrl) {
+      const line = (o: unknown) => {
+        if (hangUp.signal.aborted) return;
+        try {
+          ctrl.enqueue(enc.encode(`${JSON.stringify(o)}\n`));
+        } catch {
+          hangUp.abort(); // the stream closed under us
+        }
+      };
+      try {
+        const response = await forge(req, env, { ...opts, signal, onEvent: e => line(e) });
+        line({ type: 'result', response });
+      } catch {
+        line({ type: 'result', response: { ok: false, error: 'server-error' } });
+      }
+      if (!hangUp.signal.aborted) ctrl.close();
+    },
+    // the client went away: stop calling the provider for a page nobody is watching
+    cancel() {
+      hangUp.abort();
+    }
+  });
 }
 
 /** A tiny rate limit so a stuck client can't burn the subscription. It counts forges,
