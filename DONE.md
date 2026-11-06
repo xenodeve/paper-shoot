@@ -6,6 +6,18 @@
 
 ---
 
+## README with real gameplay + the agent forge (2026-11-06, branch `docs/20-readme-screens`)
+
+**Goal:** #20 — the developer is about to use the game for real; the README still described the old JSON-only forge and had no pictures.
+
+**Shipped:** five captures from a running build in `docs/screenshots/` (menu, a match, the forge mid-progress, a scripted skill with its votes, the scripted skill cast mid-match); README rewritten around the agent forge (roles, guarantees, fallback, live progress), configuration, the quota caveat before a public deploy, tests.
+
+**Validation:** headless Chromium 1440×900 against `bun dev` with the live key. The cast is the first in-game check of a scripted skill: Q on "Pressed-Paper Aegis" raised shield 27 → 42 and started a 9.2 s cooldown, with no bot near (its no-enemies row).
+
+**Found while capturing:** #21 (shield/heal particles burst inside the camera), #22 (long skill names overlap under Q/Z).
+
+---
+
 ## Code skills: AI scripts, server sandbox, 5-model panel (2026-11-06, /tdd, branch `feat/18-code-skills`)
 
 **Goal:** #18 — the AI builds the skill itself (developer: "ให้ทำใน sandbox และใช้ AI อีก 2-3 ตัวรุมตรวจ"), not only picks from ten effects.
