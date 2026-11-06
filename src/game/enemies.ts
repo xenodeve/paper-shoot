@@ -134,6 +134,17 @@ export class EnemyBank {
   }
 }
 
+/**
+ * The two faces of a sticker card (bots and the player's decoy). One factory, so the
+ * shader warm-up in Game.warmShaders compiles exactly the program these will use.
+ */
+export function cardMaterials(front: THREE.Texture, back: THREE.Texture) {
+  return {
+    front: new THREE.MeshBasicMaterial({ map: front, alphaTest: 0.5, toneMapped: false }),
+    back: new THREE.MeshBasicMaterial({ map: back, alphaTest: 0.5 })
+  };
+}
+
 let nextId = 1;
 
 export function makeEnemy(bank: EnemyBank, def: EnemyDef, elite: boolean, at: THREE.Vector3, wave: number): Enemy {
@@ -142,8 +153,9 @@ export function makeEnemy(bank: EnemyBank, def: EnemyDef, elite: boolean, at: TH
   const w = b.span * size;
   const root = new THREE.Group();
   const card = new THREE.Group();
-  const front = new THREE.Mesh(bank.plane, new THREE.MeshBasicMaterial({ map: b.front, alphaTest: 0.5, side: THREE.FrontSide, toneMapped: false }));
-  const back = new THREE.Mesh(bank.plane, new THREE.MeshBasicMaterial({ map: b.back, alphaTest: 0.5, side: THREE.FrontSide }));
+  const mats = cardMaterials(b.front, b.back);
+  const front = new THREE.Mesh(bank.plane, mats.front);
+  const back = new THREE.Mesh(bank.plane, mats.back);
   front.scale.set(w, w, 1);
   back.scale.set(w, w, 1);
   back.rotation.y = Math.PI;

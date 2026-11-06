@@ -650,6 +650,12 @@ h3 {
   border: 2px solid var(--ink);
   transition: transform 150ms var(--ease);
 }
+.loading-card {
+  display: grid;
+  place-items: center;
+  padding: 28px 40px;
+  font-size: 15px;
+}
 .ready:hover {
   transform: scale(1.02) rotate(-0.5deg);
 }
