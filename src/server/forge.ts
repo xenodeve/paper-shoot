@@ -67,11 +67,23 @@ function extractJson(text: string): unknown {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal): Promise<unknown> {
-  const res = await fetch(`${env.baseUrl}/chat/completions`, {
-    method: 'POST',
-    signal,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${env.apiKey}` },
+const USER_AGENT = 'paper-shoot/0.1';
+
+/**
+ * The HTTP request for one forge call. OpenCode Go routes on a per-conversation
+ * `x-opencode-session` and asks clients to name themselves in `user-agent`
+ * (docs: /v2/docs/console/go/); without the session header it answers
+ * 400 MissingSessionID (issue #14). One forge call is one conversation.
+ */
+export function buildModelRequest(req: ForgeRequest, env: ForgeEnv) {
+  return {
+    url: `${env.baseUrl}/chat/completions`,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${env.apiKey}`,
+      'user-agent': USER_AGENT,
+      'x-opencode-session': `paper-shoot-${crypto.randomUUID()}`
+    } as Record<string, string>,
     body: JSON.stringify({
       model: env.model,
       temperature: 0.9,
@@ -84,8 +96,24 @@ async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal):
         }
       ]
     })
-  });
-  if (!res.ok) throw new Error(`http-${res.status}`);
+  };
+}
+
+/** `http-<status>` plus the provider's error type when it sent one, so a failure says why. */
+export function providerError(status: number, body: string): string {
+  try {
+    const t = (JSON.parse(body) as { error?: { type?: unknown } }).error?.type;
+    if (typeof t === 'string' && /^[\w.-]{1,60}$/.test(t)) return `http-${status}:${t}`;
+  } catch {
+    /* not JSON */
+  }
+  return `http-${status}`;
+}
+
+async function callModel(req: ForgeRequest, env: ForgeEnv, signal: AbortSignal): Promise<unknown> {
+  const r = buildModelRequest(req, env);
+  const res = await fetch(r.url, { method: 'POST', signal, headers: r.headers, body: r.body });
+  if (!res.ok) throw new Error(providerError(res.status, await res.text().catch(() => '')));
   const data = (await res.json()) as { choices?: { message?: { content?: string; reasoning_content?: string } }[] };
   const msg = data.choices?.[0]?.message;
   const content = msg?.content || msg?.reasoning_content || '';
@@ -102,18 +130,32 @@ export function parseRequest(body: unknown): ForgeRequest | null {
   return { prompt, slot, lang };
 }
 
-export async function forge(req: ForgeRequest, env: ForgeEnv): Promise<ForgeResponse> {
+/** A busy provider (429, 5xx) is worth another try; anything else is a wrong request and is not. */
+const RETRYABLE = /^http-(429|5\d\d)\b/;
+const ATTEMPTS = 3;
+
+export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelayMs?: number } = {}): Promise<ForgeResponse> {
   let fallbackReason: string | undefined;
   if (env.apiKey) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30000);
+    const delay = opts.retryDelayMs ?? 900;
     try {
-      const raw = await callModel(req, env, ctrl.signal);
-      const r = balanceSkill(raw, req.slot, 'ai');
-      if (r.ok) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: env.model };
-      fallbackReason = r.error;
-    } catch (err) {
-      fallbackReason = ctrl.signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
+      // OpenCode Go answers an intermittent 429 server_error (issue #14): back off and retry
+      // inside the same 30 s budget before falling back to the offline forge.
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        try {
+          const raw = await callModel(req, env, ctrl.signal);
+          const r = balanceSkill(raw, req.slot, 'ai');
+          if (r.ok) return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'ai', model: env.model };
+          fallbackReason = r.error;
+          break;
+        } catch (err) {
+          fallbackReason = ctrl.signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
+          if (ctrl.signal.aborted || !RETRYABLE.test(fallbackReason) || attempt === ATTEMPTS) break;
+          await new Promise(res => setTimeout(res, delay * attempt));
+        }
+      }
     } finally {
       clearTimeout(timer);
     }
