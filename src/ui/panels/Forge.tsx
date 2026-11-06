@@ -12,7 +12,7 @@ import { listen, speechSupported } from '../../voice';
 import { SkillCard } from '../common';
 import { audio } from '../../game/audio';
 import type { ForgeResponse } from '../../server/forge';
-import { fallbackKind } from '../fallbackReason';
+import { fallbackKind } from '../../forgeReason';
 
 type Status = 'idle' | 'working' | 'done' | 'error';
 

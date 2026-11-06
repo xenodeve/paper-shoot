@@ -1,5 +1,6 @@
 import { balanceSkill, EFFECT_TYPES, ICONS, POWER_CAP, type BalanceNote, type Skill, type Slot } from '../skills/balance.ts';
 import { offlineSkill } from '../skills/offline.ts';
+import { isBusy } from '../forgeReason.ts';
 
 /**
  * The forge endpoint, shared by the Vite dev middleware and the Bun server.
@@ -77,7 +78,7 @@ const newSession = () => `paper-shoot-${crypto.randomUUID()}`;
  * 400 MissingSessionID (issue #14). One forge call is one conversation, so its
  * retries share the session id `forge()` passes in.
  */
-export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session = newSession()) {
+export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session: string) {
   return {
     url: `${env.baseUrl}/chat/completions`,
     headers: {
@@ -85,7 +86,7 @@ export function buildModelRequest(req: ForgeRequest, env: ForgeEnv, session = ne
       authorization: `Bearer ${env.apiKey}`,
       'user-agent': USER_AGENT,
       'x-opencode-session': session
-    } as Record<string, string>,
+    },
     body: JSON.stringify({
       model: env.model,
       temperature: 0.9,
@@ -132,9 +133,14 @@ export function parseRequest(body: unknown): ForgeRequest | null {
   return { prompt, slot, lang };
 }
 
-/** A busy provider (429, 5xx) is worth another try; anything else is a wrong request and is not. */
-const RETRYABLE = /^http-(429|5\d\d)\b/;
+/** Only a busy provider (`isBusy`: 429, 5xx) is worth another try; anything else is a wrong request. */
 const ATTEMPTS = 3;
+/** A backoff that ends early when the forge's 30 s budget runs out. */
+const pause = (ms: number, signal: AbortSignal) =>
+  new Promise<void>(done => {
+    const t = setTimeout(done, ms);
+    signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true });
+  });
 
 export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelayMs?: number } = {}): Promise<ForgeResponse> {
   let fallbackReason: string | undefined;
@@ -155,8 +161,8 @@ export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelay
           break;
         } catch (err) {
           fallbackReason = ctrl.signal.aborted ? 'timeout' : err instanceof Error ? err.message : 'error';
-          if (ctrl.signal.aborted || !RETRYABLE.test(fallbackReason) || attempt === ATTEMPTS) break;
-          await new Promise(res => setTimeout(res, delay * attempt));
+          if (!isBusy(fallbackReason) || attempt === ATTEMPTS) break;
+          await pause(delay * attempt, ctrl.signal);
         }
       }
     } finally {
@@ -171,7 +177,7 @@ export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelay
 }
 
 /** A tiny rate limit so a stuck client can't burn the subscription. It counts forges,
- *  not provider calls: with retries one forge is up to 3 calls. */
+ *  not provider calls: with retries one forge is up to ATTEMPTS calls. */
 const hits = new Map<string, number[]>();
 export function allow(ip: string, perMinute = 12): boolean {
   const now = Date.now();

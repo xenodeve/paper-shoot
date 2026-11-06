@@ -5,18 +5,16 @@ const env = { apiKey: 'test-key', baseUrl: 'https://example.test/v1', model: 'de
 const req = { prompt: 'dash forward', slot: 'tactical' as const, lang: 'en' as const };
 
 describe('buildModelRequest (OpenCode Go)', () => {
-  test('sends a per-conversation x-opencode-session and its own user agent', () => {
-    const a = buildModelRequest(req, env);
-    const b = buildModelRequest(req, env);
-    expect(a.headers['x-opencode-session']).toMatch(/^paper-shoot-[\w-]{8,}$/);
-    // one forge call = one conversation: ids differ between calls
-    expect(a.headers['x-opencode-session']).not.toBe(b.headers['x-opencode-session']);
+  test('sends the given x-opencode-session and its own user agent', () => {
+    // one id per forge call; that retries share it is tested in forge-retry.test.ts
+    const a = buildModelRequest(req, env, 'paper-shoot-abc123');
+    expect(a.headers['x-opencode-session']).toBe('paper-shoot-abc123');
     expect(a.headers['user-agent']).toMatch(/^paper-shoot\/\d/);
     expect(a.headers.authorization).toBe('Bearer test-key');
   });
 
   test('targets the chat completions route with the configured model', () => {
-    const r = buildModelRequest(req, env);
+    const r = buildModelRequest(req, env, 'paper-shoot-s');
     expect(r.url).toBe('https://example.test/v1/chat/completions');
     const body = JSON.parse(r.body);
     expect(body.model).toBe('deepseek-v4.1-flash');

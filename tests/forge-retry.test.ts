@@ -43,6 +43,7 @@ describe('forge retries a busy provider', () => {
     globalThis.fetch = (async (_url: string, init: RequestInit) => (next.push((init.headers as Record<string, string>)['x-opencode-session']), ok())) as unknown as typeof fetch;
     await forge(req, env, { retryDelayMs: 1 });
     expect(next[0]).not.toBe(ids[0]);
+    expect(ids[0]).toMatch(/^paper-shoot-[\w-]{8,}$/);
   });
 
   test('a 400 is not retried: the request itself is wrong', async () => {
