@@ -13,6 +13,12 @@ import { SkillCard } from '../common';
 import { audio } from '../../game/audio';
 import type { ForgeResponse } from '../../server/forge';
 import { fallbackKind } from '../../forgeReason';
+import { readForgeStream } from '../forgeProgress';
+
+/** `forge.stage.*` keys: the server's stages plus the browser's own last re-check. */
+type ForgeStage = 'plan' | 'code' | 'logic' | 'review' | 'draft' | 'referee';
+const ORB: Record<ForgeStage, 'searching' | 'shaping' | 'solving'> = { plan: 'searching', code: 'shaping', logic: 'solving', review: 'solving', draft: 'shaping', referee: 'solving' };
+const PANEL_SIZE = 5;
 
 type Status = 'idle' | 'working' | 'done' | 'error';
 
@@ -22,7 +28,9 @@ export function ForgePanel() {
   const [prompt, setPrompt] = useState('');
   const [slot, setSlot] = useState<Slot>('tactical');
   const [status, setStatus] = useState<Status>('idle');
-  const [step, setStep] = useState(0);
+  // real progress from the server (issue #18): the stages seen so far, and the panel's votes
+  const [stages, setStages] = useState<ForgeStage[]>([]);
+  const [votes, setVotes] = useState(0);
   const [result, setResult] = useState<Extract<ForgeResponse, { ok: true }> | null>(null);
   const [health, setHealth] = useState<{ ai: boolean; model: string } | null>(null);
   const [interim, setInterim] = useState('');
@@ -46,19 +54,26 @@ export function ForgePanel() {
     audio.play('skill');
     setStatus('working');
     setResult(null);
-    setStep(0);
-    const t1 = window.setTimeout(() => setStep(1), 500);
+    setStages([]);
+    setVotes(0);
     let res: ForgeResponse;
     try {
-      const r = await fetch('/api/forge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: text, slot, lang: t.lang }) });
-      res = (await r.json()) as ForgeResponse;
+      const r = await fetch('/api/forge', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
+        body: JSON.stringify({ prompt: text, slot, lang: t.lang }),
+        signal: AbortSignal.timeout(90000)
+      });
+      res = await readForgeStream(r, e => {
+        if (e.type === 'stage') setStages(s => (s.includes(e.stage) ? s : [...s, e.stage]));
+        else setVotes(n => n + 1);
+      });
     } catch {
       // no server at all (static hosting): forge locally, same referee
       const b = balanceSkill(offlineSkill(text, slot, t.lang), slot, 'offline');
       res = b.ok ? { ok: true, skill: b.skill, power: b.power, cap: POWER_CAP[slot], notes: b.notes, via: 'offline', fallbackReason: 'other' } : { ok: false, error: b.error };
     }
-    window.clearTimeout(t1);
-    setStep(2);
+    setStages(s => [...s, 'referee']);
     await new Promise(r => setTimeout(r, 450)); // let the referee step read
     if (!res.ok) {
       setStatus('error');
@@ -191,13 +206,13 @@ export function ForgePanel() {
         ) : (
           <div className="forge__progress sheet enter">
             <div className="forge__orb">
-              <ThinkingOrb state={working ? (step < 1 ? 'searching' : step < 2 ? 'shaping' : 'solving') : status === 'done' ? 'breathing' : 'connecting'} size={64} theme="light" color={result?.skill.color ?? '#1f2a44'} paused={!working} />
+              <ThinkingOrb state={working ? ORB[stages.at(-1) ?? 'plan'] : status === 'done' ? 'breathing' : 'connecting'} size={64} theme="light" color={result?.skill.color ?? '#1f2a44'} paused={!working} />
             </div>
             <div className="forge__lines">
               <ThoughtLine
                 working={working}
-                steps={[t('forge.step.read'), t('forge.step.draft'), t('forge.step.referee')]}
-                current={step}
+                steps={(stages.length ? stages : (['plan'] as const)).map(s => t(`forge.stage.${s}`, { n: votes, total: PANEL_SIZE }))}
+                current={Math.max(0, stages.length - 1)}
                 label={`${t('forge.thinking')}…`}
                 doneLabel={t('forge.done')}
                 fontSize={15}

@@ -1804,15 +1804,23 @@ export class Game {
     if (slot === 'tactical') this.tacCd = s.cooldown;
     else this.ultCd = s.cooldown;
     audio.play(slot === 'tactical' ? 'skill' : 'ult');
-    // A code skill plays the row its referee measured for this moment (issue #18); plain skills play now.
+    if (s.program) this.castProgram(s);
+    else for (const fx of s.effects) this.applyEffect(fx, s);
+    this.p.shake = Math.max(this.p.shake, slot === 'ultimate' ? 0.3 : 0.1);
+  }
+
+  /** A code skill plays the row its referee measured for this moment (issue #18, ADR 0003). */
+  private castProgram(s: Skill) {
     const p = this.p;
     let near = 0;
-    for (const e of this.enemies) if (e.pos.distanceToSquared(p.pos) < NEAR_RADIUS * NEAR_RADIUS) near++;
+    for (const e of this.enemies) {
+      if (e.state === 'dying' || e.state === 'pop') continue;
+      if (e.pos.distanceToSquared(p.pos) < NEAR_RADIUS * NEAR_RADIUS) near++;
+    }
     for (const fx of skillRow(s, ctxFrom(p.hp, p.shield, near, this.time - p.lastHurt))) {
       if (fx.at <= 0) this.applyEffect(fx, s);
       else this.skillQueue.push({ at: this.runTime + fx.at, fx, s });
     }
-    this.p.shake = Math.max(this.p.shake, slot === 'ultimate' ? 0.3 : 0.1);
   }
 
   /** Where the crosshair lands on the world, up to `max` away. */

@@ -48,6 +48,36 @@ export interface ChatCall {
   signal: AbortSignal;
   attempts?: number;
   retryDelayMs?: number;
+  /** stream the reply; called with the text so far each time more arrives */
+  onText?: (soFar: string) => void;
+}
+
+/** Reads an OpenAI-style SSE body, calling `onText` with the growing reply. */
+async function readStream(res: Response, onText: (soFar: string) => void): Promise<string> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') return text;
+      try {
+        const delta = (JSON.parse(data) as { choices?: { delta?: { content?: string } }[] }).choices?.[0]?.delta?.content;
+        if (delta) onText((text += delta));
+      } catch {
+        /* a keep-alive or partial line */
+      }
+    }
+  }
+  return text;
 }
 
 /** One conversation: the reply text. A busy provider is retried with the same session. */
@@ -59,11 +89,14 @@ export async function chat(p: Provider, c: ChatCall): Promise<string> {
       method: 'POST',
       signal: c.signal,
       headers: headers(p, session),
-      body: JSON.stringify({ model: c.model, ...c.params, messages: [{ role: 'system', content: c.system }, { role: 'user', content: c.user }] })
+      body: JSON.stringify({ model: c.model, ...c.params, ...(c.onText ? { stream: true } : {}), messages: [{ role: 'system', content: c.system }, { role: 'user', content: c.user }] })
     });
+    if (res.ok && c.onText && res.headers.get('content-type')?.includes('text/event-stream')) return readStream(res, c.onText);
     if (res.ok) {
       const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      return String(data.choices?.[0]?.message?.content ?? '');
+      const out = String(data.choices?.[0]?.message?.content ?? '');
+      c.onText?.(out); // a provider that ignored `stream`: one big chunk
+      return out;
     }
     const reason = providerError(res.status, await res.text().catch(() => ''));
     if (!isBusy(reason) || attempt >= attempts) throw new Error(reason);

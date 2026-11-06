@@ -1,10 +1,10 @@
 import { balanceSkill, EFFECT_TYPES, ICONS, POWER_CAP, type BalanceNote, type Skill, type Slot } from '../skills/balance.ts';
 import { offlineSkill } from '../skills/offline.ts';
 import { isBusy } from '../forgeReason.ts';
-import { codeForge } from './codeForge.ts';
+import { codeForge, type CodeForgeOptions, type ForgeEvent } from './codeForge.ts';
 import { headers, newSession, pause, providerError } from './opencode.ts';
 
-export { providerError };
+export { providerError, type ForgeEvent };
 
 /**
  * The forge endpoint, shared by the Vite dev middleware and the Bun server.
@@ -120,8 +120,13 @@ export function parseRequest(body: unknown): ForgeRequest | null {
 
 /** Only a busy provider (`isBusy`: 429, 5xx) is worth another try; anything else is a wrong request. */
 const ATTEMPTS = 3;
+/** The whole forge, code path and data fallback together, stays inside this. */
+const TOTAL_MS = 60000;
+const DATA_MS = 30000;
+const DATA_MIN_MS = 10000;
 
-export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelayMs?: number } = {}): Promise<ForgeResponse> {
+export async function forge(req: ForgeRequest, env: ForgeEnv, opts: CodeForgeOptions = {}): Promise<ForgeResponse> {
+  const started = Date.now();
   let fallbackReason: string | undefined;
   if (env.apiKey && env.codeSkills) {
     const c = await codeForge(req, env, opts);
@@ -132,9 +137,10 @@ export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelay
     // not approved: no script is used anywhere; the data forge below takes over
     console.info(`[forge] code skill not used: ${c.ok ? 'failed re-referee' : c.reason}`);
   }
+  opts.onEvent?.({ type: 'stage', stage: 'draft' });
   if (env.apiKey) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const timer = setTimeout(() => ctrl.abort(), Math.min(DATA_MS, Math.max(DATA_MIN_MS, TOTAL_MS - (Date.now() - started))));
     const delay = opts.retryDelayMs ?? 900;
     const session = newSession();
     try {
@@ -162,6 +168,30 @@ export async function forge(req: ForgeRequest, env: ForgeEnv, opts: { retryDelay
   const r = balanceSkill(offlineSkill(req.prompt, req.slot, req.lang), req.slot, 'offline');
   if (!r.ok) return { ok: false, error: r.error };
   return { ok: true, skill: r.skill, power: r.power, cap: POWER_CAP[req.slot], notes: r.notes, via: 'offline', fallbackReason };
+}
+
+/** A client that sends `accept: application/x-ndjson` gets progress as it happens. */
+export const wantsStream = (accept: string | null | undefined) => !!accept && accept.includes('application/x-ndjson');
+
+/**
+ * The forge as NDJSON: one `ForgeEvent` per line while it works, then
+ * `{type:'result', response}`. The steady trickle of lines also keeps a slow
+ * forge's connection alive through proxies and idle timeouts.
+ */
+export function forgeStream(req: ForgeRequest, env: ForgeEnv, opts: CodeForgeOptions = {}): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  return new ReadableStream({
+    async start(ctrl) {
+      const line = (o: unknown) => ctrl.enqueue(enc.encode(`${JSON.stringify(o)}\n`));
+      try {
+        const response = await forge(req, env, { ...opts, onEvent: e => line(e) });
+        line({ type: 'result', response });
+      } catch {
+        line({ type: 'result', response: { ok: false, error: 'server-error' } });
+      }
+      ctrl.close();
+    }
+  });
 }
 
 /** A tiny rate limit so a stuck client can't burn the subscription. It counts forges,

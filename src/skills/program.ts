@@ -66,4 +66,6 @@ export function skillRow(s: { effects: Effect[]; program?: Program }, ctx: Ctx):
 }
 
 export const MAX_ROW_EFFECTS = 12;
+/** Any number a script emits outside 0..MAX_NUMBER rejects the program (clamping is for small slips). */
+export const MAX_NUMBER = 1000;
 export const MAX_DELAY_S = 10;

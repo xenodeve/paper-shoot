@@ -61,8 +61,19 @@ const within = (ms: number) => {
   return { signal: ctrl.signal, done: () => clearTimeout(timer) };
 };
 
-export async function codeForge(req: CodeForgeRequest, provider: Provider, opts: { retryDelayMs?: number } = {}): Promise<CodeForgeResult> {
+/** What the player sees while a skill is forged: real stages, emitted as they happen. */
+export type ForgeStage = 'plan' | 'code' | 'logic' | 'review' | 'draft';
+export type ForgeEvent = { type: 'stage'; stage: ForgeStage } | { type: 'vote'; model: string; vote: Vote['vote'] };
+
+export interface CodeForgeOptions {
+  retryDelayMs?: number;
+  onEvent?: (e: ForgeEvent) => void;
+}
+
+export async function codeForge(req: CodeForgeRequest, provider: Provider, opts: CodeForgeOptions = {}): Promise<CodeForgeResult> {
+  const emit = opts.onEvent ?? (() => {});
   const cap = POWER_CAP[req.slot];
+  emit({ type: 'stage', stage: 'plan' });
   const lang = req.lang === 'th' ? 'Thai' : 'English';
 
   // 1. Designer — the first model that answers with a script.
@@ -70,6 +81,7 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
   let designer = '';
   let why = 'designer-failed';
   const d = within(DESIGN_MS);
+  let coding = false;
   try {
     for (const model of DESIGNERS) {
       try {
@@ -79,7 +91,14 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
           user: `Slot: ${req.slot} (budget ${cap}). Player language: ${lang}.\nIdea: ${req.prompt}`,
           params: { temperature: 0.9, max_tokens: 3000 },
           signal: d.signal,
-          retryDelayMs: opts.retryDelayMs
+          retryDelayMs: opts.retryDelayMs,
+          // planning is the NAME/DESC part; the moment the code block opens, it is coding
+          onText: soFar => {
+            if (!coding && soFar.includes('```')) {
+              coding = true;
+              emit({ type: 'stage', stage: 'code' });
+            }
+          }
         });
         design = parseDesign(text);
         if (design) {
@@ -98,6 +117,7 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
   if (!design) return { ok: false, reason: why };
 
   // 2. Referee — our code, the only guarantee. A refusal never reaches the panel.
+  emit({ type: 'stage', stage: 'logic' });
   const built = await buildTable(design.code);
   if (!built.ok) return { ok: false, reason: `referee:${built.error}` };
   const judged = checkProgram({ source: design.code, table: built.table, votes: [] }, req.slot);
@@ -106,12 +126,16 @@ export async function codeForge(req: CodeForgeRequest, provider: Provider, opts:
 
   // 3. Panel — in parallel; ≥ QUORUM usable votes, and any reject rejects.
   const review = `Idea: ${req.prompt}\nSlot: ${req.slot}\nNAME: ${design.name}\nDESC: ${design.description}\nMeasured worst-case power: ${power}/${cap}\nCode:\n${design.code}`;
+  emit({ type: 'stage', stage: 'review' });
   const p = within(PANEL_MS);
   const votes: (Vote | null)[] = await Promise.all(
     PANEL.map(async r => {
       try {
         const v = parseVote(await chat(provider, { model: r.model, system: REVIEWER(r.lens), user: review, params: r.params, signal: p.signal, retryDelayMs: opts.retryDelayMs }));
-        return v ? { model: r.model, vote: v.pass ? ('pass' as const) : ('reject' as const), reason: v.reason } : null;
+        if (!v) return null;
+        const vote = v.pass ? ('pass' as const) : ('reject' as const);
+        emit({ type: 'vote', model: r.model, vote });
+        return { model: r.model, vote, reason: v.reason };
       } catch {
         return null;
       }

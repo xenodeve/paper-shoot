@@ -12,7 +12,7 @@
  * saved skills loaded from storage) — the same rules on both sides.
  */
 
-import { ALL_CTX, MAX_DELAY_S, MAX_ROW_EFFECTS, type Program, type TimedEffect, type Vote } from './program';
+import { ALL_CTX, MAX_DELAY_S, MAX_NUMBER, MAX_ROW_EFFECTS, type Program, type TimedEffect, type Vote } from './program';
 
 export type Slot = 'tactical' | 'ultimate';
 
@@ -131,11 +131,21 @@ export function effectPower(e: Effect): number {
       return e.radius * e.duration * 0.05;
     case 'pull':
       return e.radius * e.strength * 2;
+    default:
+      return Infinity; // never cheaper than the budget
   }
 }
 
 export function skillPower(s: Pick<Skill, 'effects'>): number {
   return s.effects.reduce((sum, e) => sum + effectPower(e), 0);
+}
+
+/** What a skill is priced at: a code skill's strongest row, else its effects. */
+export function pricedPower(s: Pick<Skill, 'effects' | 'program'>): number {
+  if (!s.program) return skillPower(s);
+  let worst = 0;
+  for (const row of s.program.table) worst = Math.max(worst, skillPower({ effects: row }));
+  return worst;
 }
 
 const round = (v: number, step: number) => Math.round(v / step) * step;
@@ -188,7 +198,8 @@ function readEffect(raw: unknown, i: number, notes: BalanceNote[]): Effect | nul
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   const type = r.type as EffectType;
-  const spec = FIELDS[type];
+  // own keys only: an inherited name like "constructor" is not an effect (it would price as NaN)
+  const spec = Object.hasOwn(FIELDS, type) ? FIELDS[type] : undefined;
   if (!spec) {
     notes.push({ field: `effects[${i}]`, reason: 'unknown', from: String(r.type ?? '?').slice(0, 24) });
     return null;
@@ -253,13 +264,14 @@ export function checkProgram(input: unknown, slot: Slot): ProgramResult {
     const row: TimedEffect[] = [];
     for (const [i, e] of rowRaw.entries()) {
       // clamping is for typos; a negative or absurd number means the script is wrong
-      if (e && typeof e === 'object' && Object.values(e).some(v => typeof v === 'number' && !(v >= 0 && v <= 1000))) return { ok: false, error: 'bad-number' };
+      if (e && typeof e === 'object' && Object.values(e).some(v => typeof v === 'number' && !(v >= 0 && v <= MAX_NUMBER))) return { ok: false, error: 'bad-number' };
       const fx = readEffect(e, i, []);
       const at = num((e as Record<string, unknown> | null)?.at);
       if (!fx || at === null || at < 0 || at > MAX_DELAY_S) return { ok: false, error: 'bad-effect' };
       row.push({ ...fx, at: round(at, 0.05) });
     }
     const p = skillPower({ effects: row });
+    if (!Number.isFinite(p)) return { ok: false, error: "bad-power" };
     if (p > cap + 1e-6) return { ok: false, error: 'over-budget' };
     if (p > power) (power = p), (worstRow = r);
     table.push(row);

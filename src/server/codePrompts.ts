@@ -1,4 +1,4 @@
-// The rules every forge agent works under (docs/adr/0003-code-skills.md lists them by id).
+// The rules every forge agent works under (docs/adr/0003-code-skills-sandboxed-and-reviewed.md lists them by id).
 // AI output from these prompts is data: the server sandboxes the script and re-referees
 // every effect; the reviewers only add vetoes.
 import { EFFECT_TYPES } from '../skills/balance.ts';

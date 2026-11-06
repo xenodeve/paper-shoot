@@ -14,7 +14,14 @@ const LIMITS = { ms: 50, memory: 4 * 1024 * 1024, stack: 256 * 1024, output: 800
 const HARDEN = `
   delete globalThis.Date;
   Math.random = undefined;
-  for (const o of [Object, Object.prototype, Array, Array.prototype, Function.prototype, JSON, Math, String.prototype, Number.prototype, Boolean.prototype]) Object.freeze(o);
+  // every built-in and its prototype; not the global object itself, where onCast is declared
+  for (const name of Object.getOwnPropertyNames(globalThis)) {
+    const v = globalThis[name];
+    if (v === globalThis) continue;
+    if (typeof v === 'function' && v.prototype) Object.freeze(v.prototype);
+    if (v && (typeof v === 'object' || typeof v === 'function')) Object.freeze(v);
+  }
+  Object.freeze(Function.prototype);
   const __stringify = JSON.stringify;
 `;
 

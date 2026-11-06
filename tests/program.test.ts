@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ALL_CTX, ctxFrom, ctxIndex, skillRow } from '../src/skills/program';
-import { balanceSkill, checkProgram } from '../src/skills/balance';
+import { balanceSkill, checkProgram, pricedPower, skillPower } from '../src/skills/balance';
 
 const row = (...fx: object[]) => fx;
 const table = (fill: (i: number) => object[]) => ALL_CTX.map((_, i) => fill(i));
@@ -56,6 +56,18 @@ describe('checkProgram', () => {
     expect(checkProgram({ ...ok(), table: table(() => []) }, 'tactical')).toEqual({ ok: false, error: 'does-nothing' });
   });
 
+  test('an inherited key as an effect type ("constructor") cannot make a row cost NaN and slip past the budget', () => {
+    const p = ok();
+    const nuke = Array.from({ length: 11 }, () => ({ type: 'projectile', damage: 120, count: 5, radius: 6, at: 0 }));
+    p.table = table(i => (i === 0 ? row({ type: 'shield', amount: 20, at: 0 }) : [{ type: 'constructor', at: 0 }, ...nuke]));
+    expect(checkProgram(p, 'tactical').ok).toBe(false);
+    for (const type of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      const r = balanceSkill({ name: 'x', effects: [{ type }, { type: 'dash', distance: 8 }] }, 'tactical');
+      expect(r.ok && Number.isFinite(r.power) && Number.isFinite(r.skill.cooldown)).toBe(true);
+      expect(r.ok && r.skill.effects.map(e => e.type)).toEqual(['dash']);
+    }
+  });
+
   test('values are clamped to the effect ranges before power is measured', () => {
     const p = ok();
     p.table = table(() => row({ type: 'shield', amount: 999, at: 0 }));
@@ -84,6 +96,15 @@ describe('balanceSkill with a program', () => {
     expect(r.ok && r.skill.program?.table.length).toBe(24);
     const plain = balanceSkill(base, 'tactical');
     expect(r.ok && plain.ok && r.skill.cooldown > plain.skill.cooldown).toBe(true);
+  });
+
+  test('pricedPower: the card shows the strongest row, not the 3-effect preview', () => {
+    const big = Array.from({ length: 5 }, () => ({ type: 'reveal' as const, radius: 20, duration: 4, at: 0 }));
+    const program = { source: 'x', votes: [], table: table(i => (i === 3 ? big : row({ type: 'reveal', radius: 10, duration: 2, at: 0 }))) };
+    const r = balanceSkill({ name: 'Eyes', program }, 'tactical');
+    expect(r.ok && r.skill.effects.length).toBe(3);
+    expect(r.ok && pricedPower(r.skill)).toBeCloseTo(5 * 20 * 4 * 0.05);
+    expect(r.ok && skillPower(r.skill)).toBeCloseTo(3 * 20 * 4 * 0.05);
   });
 
   test('drops an invalid program and keeps the plain effects, with a note', () => {

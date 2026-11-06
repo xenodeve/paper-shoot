@@ -16,7 +16,7 @@ import {
 import { BotAvatar } from 'bot-avatars';
 import type { CSSProperties, ReactNode } from 'react';
 import type { Effect, Skill, SkillIcon } from '../skills/balance';
-import { POWER_CAP, skillPower } from '../skills/balance';
+import { POWER_CAP, pricedPower } from '../skills/balance';
 import type { Look } from '../profile';
 import { useT } from '../i18n';
 
@@ -69,7 +69,7 @@ export function describeEffect(fx: Effect, t: T): string {
 
 export function PowerBar({ skill }: { skill: Skill }) {
   const t = useT();
-  const p = skillPower(skill);
+  const p = pricedPower(skill);
   const cap = POWER_CAP[skill.slot];
   return (
     <div className="power" title={`${p.toFixed(1)} / ${cap}`}>
@@ -100,6 +100,7 @@ export function SkillCard({ skill, actions, highlight, style }: { skill: Skill; 
         </div>
       </header>
       {skill.description ? <p className="skill-card__desc">{skill.description}</p> : null}
+      {skill.program ? <p className="tiny muted">{t('skill.strongestCase')}</p> : null}
       <ul className="skill-card__fx">
         {skill.effects.map((fx, i) => (
           <li key={i}>{describeEffect(fx, t)}</li>
