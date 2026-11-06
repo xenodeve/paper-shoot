@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Effect, Skill } from '../skills/balance';
 import { audio } from './audio';
-import { disposeEnemy, EnemyBank, makeEnemy, waveRoster, type Enemy } from './enemies';
+import { cardMaterials, disposeEnemy, EnemyBank, ENEMIES, makeEnemy, waveRoster, type Enemy } from './enemies';
 import { Decals, InstancePool, Particles, Tracers } from './effects';
 import { hud, initialHud, type HudState, type KillItem, type Popup, type Summary } from './hud';
 import { bakeMascot, crateFace, inkSplat, INK, type Wear } from './textures';
@@ -235,6 +235,7 @@ export class Game {
   private decoyTex: { front: THREE.Texture; back: THREE.Texture; span: number; rise: number } | null = null;
   private splatTex: THREE.Texture;
   private shocks: Shock[] = [];
+  private warmMaterials: THREE.Material[] = [];
 
   // ---- world state ----
   private enemies: Enemy[] = [];
@@ -354,7 +355,13 @@ export class Game {
     this.bind();
     this.resize();
     this.reset();
-    hud.set({ ...initialHud, phase: 'ready' });
+    hud.set({ ...initialHud, phase: 'loading' });
+    // the ready card appears only when every shader is linked: no compile stall mid-match
+    this.warmShaders()
+      .catch(() => undefined)
+      .then(() => {
+        if (!this.disposed && hud.get().phase === 'loading') hud.set({ phase: 'ready' });
+      });
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
   }
@@ -435,6 +442,51 @@ export class Game {
     mesh.renderOrder = -1;
     this.scene.add(mesh);
     this.shared.cloudTex = t as unknown as THREE.Material;
+  }
+
+  /**
+   * Compile every shader program a match can need, now, while the player is on the
+   * ready card. On Windows/ANGLE each program is compiled through D3D the first time
+   * it is drawn, and that costs tens to hundreds of ms — which showed up as stutter on
+   * the first shots, the first kill, the first bot dart (issue #4). Program reuse is
+   * keyed on material parameters, so one stand-in per material shape covers every
+   * later instance of it.
+   */
+  private warmShaders(): Promise<unknown> {
+    const card = this.bank.get(ENEMIES.scout, false);
+    const faces = cardMaterials(card.front, card.back);
+    // per-use materials come from the same factories their spawn sites call
+    const temp: THREE.Material[] = [faces.front, faces.back, puddleMaterial(this.splatTex, new THREE.Color()), shockMaterial(new THREE.Color())];
+    const shared = Object.values(this.shared).filter((v): v is THREE.Material => v instanceof THREE.Material);
+    const stand = new THREE.Group();
+    for (const m of [...temp, ...shared, this.crateMat, this.goldMat, this.bank.shadowMat, this.bank.standMat]) stand.add(new THREE.Mesh(this.crateGeo, m));
+    this.scene.add(stand);
+    // pooled meshes start empty; give each one instance so its (instanced) program compiles
+    const pools = [this.particles.mesh, this.decals.mesh, this.darts.mesh, this.balls.mesh].map(p => [p, p.count] as const);
+    pools.forEach(([p]) => (p.count = 1));
+    // the muzzle flash and the weapons not in hand are hidden until used
+    const hidden: THREE.Object3D[] = [];
+    this.vmScene.traverse(o => {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    // compileAsync starts every compile now (in parallel where KHR_parallel_shader_compile
+    // exists) and resolves once the driver has finished linking, so the wait happens
+    // behind the ready card instead of in the first frames of play.
+    const done = Promise.all([this.renderer.compileAsync(this.scene, this.camera), this.renderer.compileAsync(this.vmScene, this.vmCamera)]);
+    hidden.forEach(o => (o.visible = false));
+    pools.forEach(([p, n]) => (p.count = n));
+    stand.removeFromParent();
+    // keep the stand-ins alive: disposing the last user of a program deletes it
+    this.warmMaterials = temp;
+    return done;
+  }
+
+  /** Dev/test helper: how many shader programs exist. The issue #4 play-test reads it via window.__game: it must not grow during a match. */
+  debugPrograms() {
+    return this.renderer.info.programs?.length ?? 0;
   }
 
   private buildDmgPool() {
@@ -741,6 +793,7 @@ export class Game {
     this.decoyTex?.front.dispose();
     this.decoyTex?.back.dispose();
     this.splatTex.dispose();
+    this.warmMaterials.forEach(m => m.dispose());
     this.crateMat.map?.dispose();
     this.goldMat.map?.dispose();
     this.crateMat.dispose();
@@ -1803,7 +1856,7 @@ export class Game {
       }
       case 'area': {
         const at = this.aimPoint(new THREE.Vector3(), 28);
-        const mat = new THREE.MeshBasicMaterial({ map: this.splatTex, color, transparent: true, opacity: 0.75, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+        const mat = puddleMaterial(this.splatTex, color);
         const mesh = new THREE.Mesh(this.shared.puddleGeo as THREE.BufferGeometry, mat);
         mesh.position.copy(at).setY(at.y + 0.03);
         mesh.scale.setScalar(0.01);
@@ -1825,11 +1878,12 @@ export class Game {
         const t = this.decoyTex;
         const g = new THREE.Group();
         const w = t.span * 1.7;
-        const front = new THREE.Mesh(this.bank.plane, new THREE.MeshBasicMaterial({ map: t.front, alphaTest: 0.5 }));
+        const mats = cardMaterials(t.front, t.back);
+        const front = new THREE.Mesh(this.bank.plane, mats.front);
         front.scale.set(w, w, 1);
         front.position.y = 1.7 * (0.5 + t.rise);
         const back = front.clone();
-        back.material = new THREE.MeshBasicMaterial({ map: t.back, alphaTest: 0.5 });
+        back.material = mats.back;
         back.rotation.y = Math.PI;
         g.add(front, back);
         _fwd.set(-Math.sin(p.yaw), 0, -Math.cos(p.yaw));
@@ -1885,7 +1939,7 @@ export class Game {
   }
 
   private spawnShock(at: THREE.Vector3, r: number, color: THREE.Color, life: number) {
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide });
+    const mat = shockMaterial(color);
     const mesh = new THREE.Mesh(this.shared.shockGeo as THREE.BufferGeometry, mat);
     mesh.position.copy(at).setY(at.y + 0.08);
     this.scene.add(mesh);
@@ -2065,7 +2119,7 @@ export class Game {
     const dir = new THREE.Vector3(Math.cos(a + 1.3), 0, Math.sin(a + 1.3));
     const from = target.clone().addScaledVector(dir, -120).setY(30);
     const to = target.clone().addScaledVector(dir, 120).setY(30);
-    const obj = new THREE.Mesh(paperPlaneGeometry(), new THREE.MeshToonMaterial({ color: '#fffdf7', gradientMap: this.world.ramp, side: THREE.DoubleSide }));
+    const obj = new THREE.Mesh(paperPlaneGeometry(), this.shared.chuteMat as THREE.Material); // same white folded paper as the parachute
     obj.scale.setScalar(9);
     obj.position.copy(from);
     obj.lookAt(to);
@@ -2176,8 +2230,7 @@ export class Game {
       }
       if (pl.t >= 1) {
         pl.obj.removeFromParent();
-        (pl.obj as THREE.Mesh).geometry.dispose();
-        ((pl.obj as THREE.Mesh).material as THREE.Material).dispose();
+        (pl.obj as THREE.Mesh).geometry.dispose(); // the material is shared
         this.plane = null;
       }
     }
@@ -2612,6 +2665,16 @@ function paperPlaneGeometry() {
   g.setAttribute('position', new THREE.BufferAttribute(v, 3));
   g.computeVertexNormals();
   return g;
+}
+
+/** An ink puddle for area skills. Shared with the shader warm-up so both compile one program. */
+function puddleMaterial(map: THREE.Texture, color: THREE.Color) {
+  return new THREE.MeshBasicMaterial({ map, color, transparent: true, opacity: 0.75, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+}
+
+/** The expanding ring for blasts, reveals and pulls. Shared with the shader warm-up. */
+function shockMaterial(color: THREE.Color) {
+  return new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide });
 }
 
 /** The Eraser Storm: scribbled red hatching, scrolling, translucent. */

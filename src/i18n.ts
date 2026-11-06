@@ -49,6 +49,7 @@ const en: Dict = {
   'hud.resume': 'Back in',
   'hud.quit': 'Leave match',
   'hud.clickToAim': 'Click to aim',
+  'hud.loading': 'Folding the arena…',
   'hud.down': 'Folded!',
 
   'prompt.crate': 'Open crate',
@@ -279,6 +280,7 @@ const th: Dict = {
   'hud.resume': 'เล่นต่อ',
   'hud.quit': 'ออกจากแมตช์',
   'hud.clickToAim': 'คลิกเพื่อเล็ง',
+  'hud.loading': 'กำลังพับสนาม…',
   'hud.down': 'โดนพับแล้ว!',
 
   'prompt.crate': 'เปิดกล่อง',

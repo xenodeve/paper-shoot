@@ -12,6 +12,7 @@ import { Mascot, SkillGlyph } from './common';
 import { GameOver } from './GameOver';
 import { KeyList } from './panels/Settings';
 import VoicePill from './components/VoicePill';
+import LatticeLoader from './components/LatticeLoader';
 import type { WeaponId } from '../game/weapons';
 
 export function Play({ onExit }: { onExit: () => void }) {
@@ -96,6 +97,7 @@ export function Play({ onExit }: { onExit: () => void }) {
       <canvas ref={canvasRef} className="play__canvas" />
       <div ref={dmgRef} className="dmg-layer" aria-hidden="true" />
       <Hud crossRef={crossRef} hitRef={hitRef} mapRef={mapRef} heard={heard} />
+      {phase === 'loading' && <LoadingCard />}
       {phase === 'ready' && <ReadyCard onGo={() => gameRef.current?.start()} />}
       {phase === 'paused' && (
         <PauseCard
@@ -115,6 +117,17 @@ export function Play({ onExit }: { onExit: () => void }) {
           onMenu={onExit}
         />
       )}
+    </div>
+  );
+}
+
+function LoadingCard() {
+  const t = useT();
+  return (
+    <div className="overlay">
+      <div className="loading-card sheet enter" role="status">
+        <LatticeLoader status="working" label={t('hud.loading')} pattern="orbit" grid={3} color="#1f2a44" fontSize={16} showTimer={false} />
+      </div>
     </div>
   );
 }
